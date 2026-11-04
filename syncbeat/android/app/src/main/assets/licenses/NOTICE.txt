@@ -1,0 +1,22 @@
+SyncBeat Android native runtime
+
+youtubedl-android library and FFmpeg module 0.18.1
+https://github.com/yausername/youtubedl-android/tree/0.18.1
+License: GNU GPL version 3. See youtubedl-android-GPL-3.0.txt.
+Maven coordinates: io.github.junkfood02.youtubedl-android:library:0.18.1
+and io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1.
+The GPL requirements apply when distributing a combined APK, including
+providing the corresponding source/build information and license notices.
+
+The runtime bundles yt-dlp, Python, QuickJS and FFmpeg native binaries.
+yt-dlp: https://github.com/yt-dlp/yt-dlp
+Python: https://www.python.org/psf/license/
+QuickJS: https://bellard.org/quickjs/
+FFmpeg build instructions and dependency provenance:
+https://github.com/yausername/youtubedl-android/blob/0.18.1/BUILD_FFMPEG.md
+Python build instructions:
+https://github.com/yausername/youtubedl-android/blob/0.18.1/BUILD_PYTHON.md
+
+This is a development APK. Before public distribution, preserve the complete
+notices and corresponding sources for all bundled/transitive native components.
+No warranty is provided. Official channel status does not authorize downloading.

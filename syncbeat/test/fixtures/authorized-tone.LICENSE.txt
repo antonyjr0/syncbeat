@@ -1,0 +1,4 @@
+authorized-tone.mp3 is a synthetic 440 Hz sine tone generated for SyncBeat tests
+with FFmpeg's lavfi sine source. No third-party recording was used.
+Permission: download, copy, convert and play this test tone offline.
+The test audio is dedicated to the public domain under CC0-1.0.

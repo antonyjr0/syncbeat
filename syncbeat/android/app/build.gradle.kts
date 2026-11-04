@@ -20,10 +20,16 @@ android {
         applicationId = "com.example.syncbeat"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        minSdk = maxOf(24, flutter.minSdkVersion)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64") }
+    }
+    packaging {
+        jniLibs.useLegacyPackaging = true
+        // These are runtime ZIP resources named .so by the upstream library.
+        jniLibs.keepDebugSymbols.add("**/*.zip.so")
     }
 
     buildTypes {
@@ -36,6 +42,9 @@ android {
 }
 
 dependencies {
+    implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
+    testImplementation("junit:junit:4.13.2")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 

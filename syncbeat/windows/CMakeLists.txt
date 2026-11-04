@@ -72,6 +72,18 @@ endif()
 set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
 
+# Portable toolchain; only runtime files and license notices are bundled.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../tools/yt-dlp.exe")
+  install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/yt-dlp.exe"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/ffmpeg.exe"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/ffprobe.exe"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/deno.exe"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/tools" COMPONENT Runtime OPTIONAL)
+  install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../tools/licenses"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/tools" COMPONENT Runtime OPTIONAL)
+endif()
+
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 

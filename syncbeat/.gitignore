@@ -41,6 +41,8 @@ config/app_config.json
 .tokens/
 staging/
 temporary_media/
+tools/
+android/.kotlin/
 
 # Symbolication related
 app.*.symbols

@@ -56,9 +56,14 @@ class AppDirectoryStagingStorage implements AudioStagingStorage {
           continue;
         }
         final fileName = manifest['fileName'] as String?;
-        if (fileName == null) continue;
+        if (fileName == null || p.basename(fileName) != fileName) continue;
         final file = File(p.join(targetDirectory.path, fileName));
         if (!await file.exists()) continue;
+        if (await file.length() != manifest['sizeBytes'] ||
+            (await sha256.bind(file.openRead()).first).toString() !=
+                manifest['sha256']) {
+          continue;
+        }
         return StagedAudioFile(
           path: file.path,
           fileName: fileName,
@@ -72,6 +77,8 @@ class AppDirectoryStagingStorage implements AudioStagingStorage {
       } on FormatException {
         continue;
       } on TypeError {
+        continue;
+      } on FileSystemException {
         continue;
       }
     }
@@ -105,13 +112,15 @@ class AppDirectoryStagingStorage implements AudioStagingStorage {
     final baseName = sanitizeFileName(
       '${candidate.title} - ${candidate.artist} - ${candidate.providerId}-${candidate.id}',
     );
-    var file = File(p.join(targetDirectory.path, '$baseName.mp3'));
+    var finalFile = File(p.join(targetDirectory.path, '$baseName.mp3'));
     var suffix = 1;
-    while (await file.exists()) {
-      file = File(p.join(targetDirectory.path, '$baseName-$suffix.mp3'));
+    while (await finalFile.exists() ||
+        await File('${finalFile.path}.part').exists()) {
+      finalFile = File(p.join(targetDirectory.path, '$baseName-$suffix.mp3'));
       suffix++;
     }
 
+    var file = File('${finalFile.path}.part');
     await file.create(exclusive: true);
     final sink = file.openWrite(mode: FileMode.writeOnlyAppend);
     final hashSink = _DigestAccumulator();
@@ -158,6 +167,11 @@ class AppDirectoryStagingStorage implements AudioStagingStorage {
         );
       }
       cancellationToken.throwIfCancelled();
+      if (expectedBytes != null && receivedBytes != expectedBytes) {
+        throw const AudioSourceException(
+          'File incompleto: dimensione diversa da quella prevista.',
+        );
+      }
       if (signature.length < 3 || !_isMp3Signature(signature)) {
         throw const AudioSourceException(
           'Il file scaricato è vuoto o non è un MP3.',
@@ -167,6 +181,7 @@ class AppDirectoryStagingStorage implements AudioStagingStorage {
       await sink.flush();
       await sink.close();
       await iterator.cancel();
+      file = await file.rename(finalFile.path);
       final digest = hashSink.digest.toString();
       final manifestFile = File('${file.path}.json');
       final temporaryManifest = File('${manifestFile.path}.tmp');

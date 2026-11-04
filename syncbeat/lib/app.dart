@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'config/app_config.dart';
 import 'features/audio_sources/audio_match_dialog.dart';
+import 'features/audio_sources/local_audio_library.dart';
+import 'features/audio_sources/youtube_match_dialog.dart';
 import 'models/spotify_models.dart';
 import 'services/metadata_cache.dart';
 import 'services/spotify_api_service.dart';
@@ -304,9 +306,26 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 1120),
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(28, 24, 28, 48),
+              padding: EdgeInsets.fromLTRB(
+                MediaQuery.sizeOf(context).width < 600 ? 16 : 28,
+                24,
+                MediaQuery.sizeOf(context).width < 600 ? 16 : 28,
+                48,
+              ),
               children: [
                 _buildHeader(colorScheme),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const LocalAudioLibrary(),
+                      ),
+                    ),
+                    icon: const Icon(Icons.library_music),
+                    label: const Text('MP3 locali · ascolta'),
+                  ),
+                ),
                 const SizedBox(height: 28),
                 _buildConnectionPanel(colorScheme),
                 const SizedBox(height: 28),
@@ -323,135 +342,178 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
     );
   }
 
-  Widget _buildHeader(ColorScheme colors) => Row(
-    children: [
-      Container(
-        width: 52,
-        height: 52,
-        decoration: BoxDecoration(
-          color: colors.primary,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: const Icon(
-          Icons.headphones_rounded,
-          color: Colors.white,
-          size: 28,
-        ),
-      ),
-      const SizedBox(width: 14),
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'SyncBeat',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                color: colors.primary,
-                fontWeight: FontWeight.w800,
-              ),
+  Widget _buildHeader(ColorScheme colors) => LayoutBuilder(
+    builder: (context, constraints) {
+      final compact =
+          constraints.maxWidth / MediaQuery.textScalerOf(context).scale(1) <
+          650;
+      final identity = Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: colors.primary,
+              borderRadius: BorderRadius.circular(14),
             ),
-            Text(
-              'AMAZFIT ACTIVE 3 PREMIUM  /  LIBRERIA OFFLINE',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: const Color(0xFF68796F),
-                fontWeight: FontWeight.w700,
-              ),
+            child: const Icon(
+              Icons.headphones_rounded,
+              color: Colors.white,
+              size: 28,
             ),
-          ],
-        ),
-      ),
-      _StatusPill(
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'SyncBeat',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: colors.primary,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  'AMAZFIT ACTIVE 3 PREMIUM  /  LIBRERIA OFFLINE',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: const Color(0xFF68796F),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+      final status = _StatusPill(
         label: _connected ? 'SPOTIFY COLLEGATO' : 'CONFIGURAZIONE',
         color: _connected ? const Color(0xFF2C785B) : const Color(0xFFBB633E),
-      ),
-    ],
+      );
+      if (compact) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [identity, const SizedBox(height: 12), status],
+        );
+      }
+      return Row(
+        children: [
+          Expanded(child: identity),
+          const SizedBox(width: 20),
+          status,
+        ],
+      );
+    },
   );
 
-  Widget _buildConnectionPanel(ColorScheme colors) => Container(
-    padding: const EdgeInsets.all(22),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: const Color(0xFFDCE5DC)),
-    ),
-    child: LayoutBuilder(
-      builder: (context, constraints) {
-        final content = Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: const Color(0xFFE9F2EC),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(Icons.music_note_rounded, color: colors.primary),
+  Widget _buildConnectionPanel(ColorScheme colors) => LayoutBuilder(
+    builder: (context, constraints) {
+      final compact =
+          constraints.maxWidth / MediaQuery.textScalerOf(context).scale(1) <
+          650;
+      final accountIcon = Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: const Color(0xFFE9F2EC),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(Icons.music_note_rounded, color: colors.primary),
+      );
+      final details = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _connected ? 'Account Spotify' : 'Collega Spotify',
+            key: const ValueKey('spotify-account-title'),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: colors.primary,
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _connected ? 'Account Spotify' : 'Collega Spotify',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: colors.primary,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    _connected
-                        ? 'Playlist e metadati disponibili per l’importazione.'
-                        : 'Accesso sicuro con OAuth 2.0 e PKCE.',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFF68796F),
-                    ),
-                  ),
-                ],
+          ),
+          const SizedBox(height: 3),
+          Text(
+            _connected
+                ? 'Playlist e metadati disponibili per l\u2019importazione.'
+                : 'Accesso sicuro con OAuth 2.0 e PKCE.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: const Color(0xFF68796F)),
+          ),
+        ],
+      );
+      final info =
+          compact &&
+              (constraints.maxWidth - 32) /
+                      MediaQuery.textScalerOf(context).scale(1) <
+                  240
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [accountIcon, const SizedBox(height: 12), details],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                accountIcon,
+                const SizedBox(width: 14),
+                Expanded(child: details),
+              ],
+            );
+      final actions = Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          if (_connected) ...[
+            OutlinedButton.icon(
+              onPressed: _busyAction == null ? _loadPlaylists : null,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Aggiorna'),
+            ),
+            IconButton(
+              tooltip: 'Disconnetti Spotify',
+              onPressed: _busyAction == null ? _disconnect : null,
+              icon: const Icon(Icons.logout_rounded),
+            ),
+          ] else
+            FilledButton.icon(
+              onPressed: _busyAction == null && !_restoring ? _connect : null,
+              icon: _busyAction == 'connect'
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.link_rounded, size: 18),
+              label: Text(
+                _busyAction == 'connect' ? 'In attesa...' : 'Collega account',
               ),
             ),
-            const SizedBox(width: 16),
-            if (_connected)
-              Wrap(
-                spacing: 8,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _busyAction == null ? _loadPlaylists : null,
-                    icon: const Icon(Icons.refresh_rounded, size: 18),
-                    label: const Text('Aggiorna'),
-                  ),
-                  IconButton(
-                    tooltip: 'Disconnetti Spotify',
-                    onPressed: _busyAction == null ? _disconnect : null,
-                    icon: const Icon(Icons.logout_rounded),
-                  ),
-                ],
+        ],
+      );
+      return Container(
+        key: const ValueKey('spotify-connection-panel'),
+        width: double.infinity,
+        padding: EdgeInsets.all(compact ? 16 : 22),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFDCE5DC)),
+        ),
+        child: compact
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [info, const SizedBox(height: 16), actions],
               )
-            else
-              FilledButton.icon(
-                onPressed: _busyAction == null && !_restoring ? _connect : null,
-                icon: _busyAction == 'connect'
-                    ? const SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.link_rounded, size: 18),
-                label: Text(
-                  _busyAction == 'connect' ? 'In attesa...' : 'Collega account',
-                ),
+            : Row(
+                children: [
+                  Expanded(child: info),
+                  const SizedBox(width: 24),
+                  actions,
+                ],
               ),
-          ],
-        );
-        if (constraints.maxWidth < 650) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [content],
-          );
-        }
-        return content;
-      },
-    ),
+      );
+    },
   );
 
   Widget _buildSetupStatus(ColorScheme colors) {
@@ -467,6 +529,11 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
             ? 'Client ID richiesto'
             : 'Ricerca pronta',
         AppConfig.jamendoClientId.isNotEmpty,
+      ),
+      const _SetupStatus(
+        'YouTube · provider principale',
+        'Ricerca yt-dlp su Windows e Android',
+        true,
       ),
       const _SetupStatus('Download offline', 'Autorizzazione richiesta', false),
       const _SetupStatus('Cartella staging', 'Directory privata app', false),
@@ -489,58 +556,71 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
             color: const Color(0xFFEAF0E9),
             borderRadius: BorderRadius.circular(10),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
-          child: Wrap(
-            spacing: 24,
-            runSpacing: 4,
-            children: statuses
-                .map(
-                  (status) => SizedBox(
-                    width: 170,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      child: Row(
-                        children: [
-                          Icon(
-                            status.complete
-                                ? Icons.check_circle_rounded
-                                : Icons.radio_button_unchecked_rounded,
-                            size: 17,
-                            color: status.complete
-                                ? const Color(0xFF33765A)
-                                : const Color(0xFF9A6E51),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  status.label,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.labelMedium
-                                      ?.copyWith(
-                                        color: colors.primary,
-                                        fontWeight: FontWeight.w700,
-                                      ),
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final scale = MediaQuery.textScalerOf(context).scale(1);
+              final columns = ((constraints.maxWidth + 24) / (220 * scale + 24))
+                  .floor()
+                  .clamp(1, 5);
+              final tileWidth =
+                  (constraints.maxWidth - 24 * (columns - 1)) / columns;
+              return Wrap(
+                spacing: 24,
+                runSpacing: 4,
+                children: statuses
+                    .map(
+                      (status) => SizedBox(
+                        width: tileWidth,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Row(
+                            children: [
+                              Icon(
+                                status.complete
+                                    ? Icons.check_circle_rounded
+                                    : Icons.radio_button_unchecked_rounded,
+                                size: 17,
+                                color: status.complete
+                                    ? const Color(0xFF33765A)
+                                    : const Color(0xFF9A6E51),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      status.label,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelMedium
+                                          ?.copyWith(
+                                            color: colors.primary,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                    ),
+                                    Text(
+                                      status.value,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(
+                                            color: const Color(0xFF68796F),
+                                          ),
+                                    ),
+                                  ],
                                 ),
-                                Text(
-                                  status.value,
-                                  style: Theme.of(context).textTheme.labelSmall
-                                      ?.copyWith(
-                                        color: const Color(0xFF68796F),
-                                      ),
-                                ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
-                )
-                .toList(),
+                    )
+                    .toList(),
+              );
+            },
           ),
         ),
         if (_errorMessage != null) ...[
@@ -642,7 +722,9 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
               icon: const Icon(Icons.download_for_offline_outlined, size: 18),
               label: const Text('Carica brani'),
             );
-            if (constraints.maxWidth < 560) {
+            if (constraints.maxWidth /
+                    MediaQuery.textScalerOf(context).scale(1) <
+                560) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [dropdown, const SizedBox(height: 10), loadButton],
@@ -732,7 +814,8 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
             icon: const Icon(Icons.add_rounded, size: 18),
             label: const Text('Importa'),
           );
-          if (constraints.maxWidth < 560) {
+          if (constraints.maxWidth / MediaQuery.textScalerOf(context).scale(1) <
+              560) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [input, const SizedBox(height: 8), submit],
@@ -779,6 +862,10 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
               for (var index = 0; index < _tracks.length; index++) ...[
                 _TrackRow(
                   track: _tracks[index],
+                  onYoutube: () => showDialog<void>(
+                    context: context,
+                    builder: (_) => YoutubeMatchDialog(track: _tracks[index]),
+                  ),
                   onFindAudio: () => showDialog<void>(
                     context: context,
                     builder: (_) => AudioMatchDialog(track: _tracks[index]),
@@ -887,13 +974,22 @@ class _EmptySection extends StatelessWidget {
 }
 
 class _TrackRow extends StatelessWidget {
-  const _TrackRow({required this.track, required this.onFindAudio});
+  const _TrackRow({
+    required this.track,
+    required this.onFindAudio,
+    required this.onYoutube,
+  });
 
   final SpotifyTrack track;
   final VoidCallback onFindAudio;
+  final VoidCallback onYoutube;
 
   @override
   Widget build(BuildContext context) {
+    final compact =
+        MediaQuery.sizeOf(context).width /
+            MediaQuery.textScalerOf(context).scale(1) <
+        600;
     final imageUrl = track.imageUrl;
     final minutes = track.durationMs ~/ 60000;
     final seconds = (track.durationMs % 60000) ~/ 1000;
@@ -933,7 +1029,7 @@ class _TrackRow extends StatelessWidget {
               children: [
                 Text(
                   track.title,
-                  maxLines: 1,
+                  maxLines: compact ? 2 : 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Color(0xFF183A32),
@@ -943,24 +1039,37 @@ class _TrackRow extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   '${track.artistLine}${track.album.isEmpty ? '' : '  ·  ${track.album}'}',
-                  maxLines: 1,
+                  maxLines: compact ? 3 : 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Color(0xFF68796F),
                     fontSize: 12,
                   ),
                 ),
+                if (compact) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    '$minutes:${seconds.toString().padLeft(2, '0')}',
+                    style: const TextStyle(color: Color(0xFF68796F)),
+                  ),
+                ],
+                TextButton.icon(
+                  onPressed: onYoutube,
+                  icon: const Icon(Icons.video_library_outlined),
+                  label: const Text('YouTube / MP3'),
+                ),
               ],
             ),
           ),
-          const SizedBox(width: 12),
-          Text(
-            '$minutes:${seconds.toString().padLeft(2, '0')}',
-            style: const TextStyle(
-              color: Color(0xFF68796F),
-              fontFeatures: [FontFeature.tabularFigures()],
+          if (!compact) const SizedBox(width: 12),
+          if (!compact)
+            Text(
+              '$minutes:${seconds.toString().padLeft(2, '0')}',
+              style: const TextStyle(
+                color: Color(0xFF68796F),
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
             ),
-          ),
           IconButton(
             tooltip: 'Cerca una fonte audio autorizzata',
             onPressed: onFindAudio,

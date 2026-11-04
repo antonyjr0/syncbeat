@@ -10,6 +10,7 @@ import 'jamendo_provider.dart';
 import 'local_mp3_provider.dart';
 import 'staging_storage.dart';
 import 'track_matcher.dart';
+import 'youtube_match_dialog.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class AudioMatchDialog extends StatefulWidget {
@@ -251,6 +252,17 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
               spacing: 8,
               runSpacing: 8,
               children: [
+                FilledButton.icon(
+                  onPressed: _searching || _downloading
+                      ? null
+                      : () => showDialog<void>(
+                          context: context,
+                          builder: (_) =>
+                              YoutubeMatchDialog(track: widget.track),
+                        ),
+                  icon: const Icon(Icons.video_library),
+                  label: const Text('YouTube · ricerca principale'),
+                ),
                 FilledButton.icon(
                   onPressed: _searching || _downloading ? null : _searchJamendo,
                   icon: _searching

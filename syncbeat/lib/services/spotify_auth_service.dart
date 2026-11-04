@@ -97,6 +97,7 @@ class SpotifyAuthService {
     http.Client? httpClient,
     AppLinks? appLinks,
     Future<bool> Function(Uri uri)? openExternal,
+    this.callbackTimeout = const Duration(minutes: 3),
   }) : _tokenStore = secureTokenStore,
        _clientId = spotifyClientId,
        _httpClient = httpClient ?? http.Client(),
@@ -108,9 +109,8 @@ class SpotifyAuthService {
   final http.Client _httpClient;
   final AppLinks _appLinks;
   final Future<bool> Function(Uri uri) _openExternal;
-  StreamSubscription<Uri>? _androidSubscription;
-
-  static const _callbackTimeout = Duration(minutes: 3);
+  final Duration callbackTimeout;
+  bool _signingIn = false;
 
   static Uri get redirectUri {
     if (defaultTargetPlatform == TargetPlatform.windows) {
@@ -187,16 +187,67 @@ class SpotifyAuthService {
       'code_challenge': createCodeChallenge(verifier),
     });
 
-    final callback = defaultTargetPlatform == TargetPlatform.windows
-        ? _waitForWindowsCallback(redirect)
-        : _waitForAndroidCallback();
+    if (_signingIn) {
+      throw const SpotifyAuthException('Accesso Spotify già in corso.');
+    }
+    _signingIn = true;
+    HttpServer? server;
+    StreamSubscription<HttpRequest>? windowsSubscription;
+    StreamSubscription<Uri>? androidSubscription;
+    final callback = Completer<Uri>();
+    // A listener can fail while opening the browser; retain the error for await
+    // without allowing it to escape as an unhandled asynchronous exception.
+    callback.future.ignore();
+    void fail(Object error, StackTrace stack) {
+      if (!callback.isCompleted) callback.completeError(error, stack);
+    }
+
     try {
-      if (!await _openExternal(authorizeUri)) {
+      if (defaultTargetPlatform == TargetPlatform.windows) {
+        try {
+          server = await HttpServer.bind(
+            InternetAddress.loopbackIPv4,
+            redirect.port,
+          );
+        } on SocketException {
+          throw SpotifyAuthException(
+            'La porta ${redirect.port} è occupata. Chiudi il processo che la usa e riprova.',
+          );
+        }
+        windowsSubscription = server.listen((request) {
+          if (request.uri.path != redirect.path) {
+            request.response.statusCode = HttpStatus.notFound;
+            request.response.close().ignore();
+            return;
+          }
+          request.response
+            ..statusCode = HttpStatus.ok
+            ..headers.contentType = ContentType.html
+            ..write(
+              '<!doctype html><title>SyncBeat</title><p>Puoi tornare a SyncBeat.</p>',
+            );
+          request.response.close().ignore();
+          if (!callback.isCompleted) callback.complete(request.uri);
+        }, onError: fail);
+      } else {
+        androidSubscription = _appLinks.uriLinkStream.listen((uri) {
+          // app_links may replay the launch URI from a previous login. Only the
+          // current PKCE transaction can complete this attempt.
+          if (uri.scheme == redirect.scheme &&
+              uri.host == redirect.host &&
+              uri.path == redirect.path &&
+              uri.queryParameters['state'] == state &&
+              !callback.isCompleted) {
+            callback.complete(uri);
+          }
+        }, onError: fail);
+      }
+      if (!await _openExternal(authorizeUri).timeout(callbackTimeout)) {
         throw const SpotifyAuthException(
           'Impossibile aprire il browser per autorizzare Spotify.',
         );
       }
-      final responseUri = await callback.timeout(_callbackTimeout);
+      final responseUri = await callback.future.timeout(callbackTimeout);
       final responseState = responseUri.queryParameters['state'];
       if (responseState != state) {
         throw const SpotifyAuthException(
@@ -224,8 +275,13 @@ class SpotifyAuthService {
         'Tempo scaduto in attesa del callback Spotify. Verifica il redirect URI registrato.',
       );
     } finally {
-      await _androidSubscription?.cancel();
-      _androidSubscription = null;
+      try {
+        await server?.close(force: true);
+        await windowsSubscription?.cancel();
+        await androidSubscription?.cancel();
+      } finally {
+        _signingIn = false;
+      }
     }
   }
 
@@ -299,60 +355,6 @@ class SpotifyAuthService {
       ),
       scopes: returnedScopes.isEmpty ? fallbackScopes : returnedScopes.toSet(),
     );
-  }
-
-  Future<Uri> _waitForWindowsCallback(Uri redirect) async {
-    HttpServer server;
-    try {
-      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 8888);
-    } on SocketException {
-      throw const SpotifyAuthException(
-        'La porta 8888 è occupata. Chiudi il processo che la usa e riprova.',
-      );
-    }
-    try {
-      final request = await server.first;
-      final callbackUri = request.uri;
-      request.response
-        ..statusCode = HttpStatus.ok
-        ..headers.contentType = ContentType.html
-        ..write(
-          '<!doctype html><title>SyncBeat</title><p>Puoi tornare a SyncBeat.</p>',
-        );
-      await request.response.close();
-      if (callbackUri.path != redirect.path) {
-        throw const SpotifyAuthException(
-          'Percorso callback Spotify non valido.',
-        );
-      }
-      return callbackUri;
-    } finally {
-      await server.close(force: true);
-    }
-  }
-
-  Future<Uri> _waitForAndroidCallback() async {
-    final completer = Completer<Uri>();
-    _androidSubscription = _appLinks.uriLinkStream.listen(
-      (uri) {
-        if (uri.scheme == 'amazfitmusicsync' &&
-            uri.host == 'callback' &&
-            !completer.isCompleted) {
-          completer.complete(uri);
-        }
-      },
-      onError: (Object error) {
-        if (!completer.isCompleted) completer.completeError(error);
-      },
-    );
-    final initialUri = await _appLinks.getInitialLink();
-    if (initialUri != null &&
-        initialUri.scheme == 'amazfitmusicsync' &&
-        initialUri.host == 'callback' &&
-        !completer.isCompleted) {
-      completer.complete(initialUri);
-    }
-    return completer.future;
   }
 
   Future<void> signOut() => _tokenStore.clear();
