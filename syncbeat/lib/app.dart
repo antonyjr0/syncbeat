@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'config/app_config.dart';
+import 'theme/syncbeat_theme.dart';
 import 'features/audio_sources/audio_match_dialog.dart';
 import 'features/audio_sources/local_audio_library.dart';
 import 'features/audio_sources/youtube_match_dialog.dart';
@@ -23,49 +24,11 @@ class SyncBeatApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const ink = Color(0xFF183A32);
-    const leaf = Color(0xFF3B8065);
-    const canvas = Color(0xFFF3F6F1);
     return MaterialApp(
       title: 'SyncBeat',
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme:
-            ColorScheme.fromSeed(
-              seedColor: leaf,
-              brightness: Brightness.light,
-            ).copyWith(
-              primary: ink,
-              secondary: const Color(0xFFD66C45),
-              surface: Colors.white,
-            ),
-        scaffoldBackgroundColor: canvas,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: canvas,
-          foregroundColor: ink,
-          elevation: 0,
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.white,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFD9E2D9)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFD9E2D9)),
-          ),
-        ),
-        filledButtonTheme: FilledButtonThemeData(
-          style: FilledButton.styleFrom(
-            minimumSize: const Size(48, 46),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-        ),
-      ),
+      theme: SyncBeatTheme.build(Brightness.light),
+      darkTheme: SyncBeatTheme.build(Brightness.dark),
+      themeMode: ThemeMode.system,
       home: SyncBeatHomePage(
         authService: authService,
         apiService: apiService,
@@ -235,9 +198,7 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
     final trackId = _parseTrackId(_trackInput.text.trim());
     if (trackId == null) {
       _showError(
-        const FormatException(
-          'Inserisci un ID o link Spotify a un brano valido.',
-        ),
+        FormatException('Inserisci un ID o link Spotify a un brano valido.'),
       );
       return;
     }
@@ -304,7 +265,7 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1120),
+            constraints: BoxConstraints(maxWidth: 1120),
             child: ListView(
               padding: EdgeInsets.fromLTRB(
                 MediaQuery.sizeOf(context).width < 600 ? 16 : 28,
@@ -319,20 +280,20 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
                   child: TextButton.icon(
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
-                        builder: (_) => const LocalAudioLibrary(),
+                        builder: (_) => LocalAudioLibrary(),
                       ),
                     ),
-                    icon: const Icon(Icons.library_music),
-                    label: const Text('MP3 locali · ascolta'),
+                    icon: Icon(Icons.library_music),
+                    label: Text('MP3 locali · ascolta'),
                   ),
                 ),
-                const SizedBox(height: 28),
+                SizedBox(height: 28),
                 _buildConnectionPanel(colorScheme),
-                const SizedBox(height: 28),
+                SizedBox(height: 28),
                 _buildSetupStatus(colorScheme),
-                const SizedBox(height: 30),
+                SizedBox(height: 30),
                 _buildPlaylistSection(colorScheme),
-                const SizedBox(height: 30),
+                SizedBox(height: 30),
                 _buildTrackSection(colorScheme),
               ],
             ),
@@ -350,20 +311,13 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
       final identity = Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
+          Image.asset(
+            'assets/branding/app_icon.png',
             width: 52,
             height: 52,
-            decoration: BoxDecoration(
-              color: colors.primary,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(
-              Icons.headphones_rounded,
-              color: Colors.white,
-              size: 28,
-            ),
+            semanticLabel: 'Logo SyncBeat',
           ),
-          const SizedBox(width: 14),
+          SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -378,7 +332,7 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
                 Text(
                   'AMAZFIT ACTIVE 3 PREMIUM  /  LIBRERIA OFFLINE',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: const Color(0xFF68796F),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -389,18 +343,20 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
       );
       final status = _StatusPill(
         label: _connected ? 'SPOTIFY COLLEGATO' : 'CONFIGURAZIONE',
-        color: _connected ? const Color(0xFF2C785B) : const Color(0xFFBB633E),
+        color: _connected
+            ? SyncBeatStatusColors.of(context).success
+            : SyncBeatStatusColors.of(context).warning,
       );
       if (compact) {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [identity, const SizedBox(height: 12), status],
+          children: [identity, SizedBox(height: 12), status],
         );
       }
       return Row(
         children: [
           Expanded(child: identity),
-          const SizedBox(width: 20),
+          SizedBox(width: 20),
           status,
         ],
       );
@@ -416,7 +372,7 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
         width: 44,
         height: 44,
         decoration: BoxDecoration(
-          color: const Color(0xFFE9F2EC),
+          color: Theme.of(context).colorScheme.primaryContainer,
           borderRadius: BorderRadius.circular(10),
         ),
         child: Icon(Icons.music_note_rounded, color: colors.primary),
@@ -426,20 +382,20 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
         children: [
           Text(
             _connected ? 'Account Spotify' : 'Collega Spotify',
-            key: const ValueKey('spotify-account-title'),
+            key: ValueKey('spotify-account-title'),
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w700,
               color: colors.primary,
             ),
           ),
-          const SizedBox(height: 3),
+          SizedBox(height: 3),
           Text(
             _connected
                 ? 'Playlist e metadati disponibili per l\u2019importazione.'
                 : 'Accesso sicuro con OAuth 2.0 e PKCE.',
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: const Color(0xFF68796F)),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       );
@@ -450,13 +406,13 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
                   240
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [accountIcon, const SizedBox(height: 12), details],
+              children: [accountIcon, SizedBox(height: 12), details],
             )
           : Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 accountIcon,
-                const SizedBox(width: 14),
+                SizedBox(width: 14),
                 Expanded(child: details),
               ],
             );
@@ -468,23 +424,23 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
           if (_connected) ...[
             OutlinedButton.icon(
               onPressed: _busyAction == null ? _loadPlaylists : null,
-              icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('Aggiorna'),
+              icon: Icon(Icons.refresh_rounded, size: 18),
+              label: Text('Aggiorna'),
             ),
             IconButton(
               tooltip: 'Disconnetti Spotify',
               onPressed: _busyAction == null ? _disconnect : null,
-              icon: const Icon(Icons.logout_rounded),
+              icon: Icon(Icons.logout_rounded),
             ),
           ] else
             FilledButton.icon(
               onPressed: _busyAction == null && !_restoring ? _connect : null,
               icon: _busyAction == 'connect'
-                  ? const SizedBox.square(
+                  ? SizedBox.square(
                       dimension: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(Icons.link_rounded, size: 18),
+                  : Icon(Icons.link_rounded, size: 18),
               label: Text(
                 _busyAction == 'connect' ? 'In attesa...' : 'Collega account',
               ),
@@ -492,23 +448,25 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
         ],
       );
       return Container(
-        key: const ValueKey('spotify-connection-panel'),
+        key: ValueKey('spotify-connection-panel'),
         width: double.infinity,
         padding: EdgeInsets.all(compact ? 16 : 22),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFDCE5DC)),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
         ),
         child: compact
             ? Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [info, const SizedBox(height: 16), actions],
+                children: [info, SizedBox(height: 16), actions],
               )
             : Row(
                 children: [
                   Expanded(child: info),
-                  const SizedBox(width: 24),
+                  SizedBox(width: 24),
                   actions,
                 ],
               ),
@@ -530,15 +488,15 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
             : 'Ricerca pronta',
         AppConfig.jamendoClientId.isNotEmpty,
       ),
-      const _SetupStatus(
+      _SetupStatus(
         'YouTube · provider principale',
         'Ricerca yt-dlp su Windows e Android',
         true,
       ),
-      const _SetupStatus('Download offline', 'Autorizzazione richiesta', false),
-      const _SetupStatus('Cartella staging', 'Directory privata app', false),
-      const _SetupStatus('Handoff Zepp', 'Importazione manuale', false),
-      const _SetupStatus('Database Appwrite', 'Da collegare', false),
+      _SetupStatus('Download offline', 'Autorizzazione richiesta', false),
+      _SetupStatus('Cartella staging', 'Directory privata app', false),
+      _SetupStatus('Handoff Zepp', 'Importazione manuale', false),
+      _SetupStatus('Database Appwrite', 'Da collegare', false),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -550,14 +508,14 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
             fontWeight: FontWeight.w700,
           ),
         ),
-        const SizedBox(height: 12),
+        SizedBox(height: 12),
         Container(
           decoration: BoxDecoration(
-            color: const Color(0xFFEAF0E9),
+            color: Theme.of(context).colorScheme.surfaceContainerLow,
             borderRadius: BorderRadius.circular(10),
           ),
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           child: LayoutBuilder(
             builder: (context, constraints) {
               final scale = MediaQuery.textScalerOf(context).scale(1);
@@ -574,7 +532,7 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
                       (status) => SizedBox(
                         width: tileWidth,
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          padding: EdgeInsets.symmetric(vertical: 12),
                           child: Row(
                             children: [
                               Icon(
@@ -583,10 +541,10 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
                                     : Icons.radio_button_unchecked_rounded,
                                 size: 17,
                                 color: status.complete
-                                    ? const Color(0xFF33765A)
-                                    : const Color(0xFF9A6E51),
+                                    ? SyncBeatStatusColors.of(context).success
+                                    : SyncBeatStatusColors.of(context).warning,
                               ),
-                              const SizedBox(width: 8),
+                              SizedBox(width: 8),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -607,7 +565,9 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
                                           .textTheme
                                           .labelSmall
                                           ?.copyWith(
-                                            color: const Color(0xFF68796F),
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.onSurfaceVariant,
                                           ),
                                     ),
                                   ],
@@ -624,32 +584,34 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
           ),
         ),
         if (_errorMessage != null) ...[
-          const SizedBox(height: 12),
+          SizedBox(height: 12),
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: const Color(0xFFFFECE4),
+              color: Theme.of(context).colorScheme.errorContainer,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFFE9B49B)),
+              border: Border.all(color: Theme.of(context).colorScheme.error),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(
+                Icon(
                   Icons.error_outline_rounded,
-                  color: Color(0xFF9C4528),
+                  color: Theme.of(context).colorScheme.error,
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     _errorMessage!,
-                    style: const TextStyle(color: Color(0xFF74381F)),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onErrorContainer,
+                    ),
                   ),
                 ),
                 IconButton(
                   tooltip: 'Chiudi avviso',
                   onPressed: () => setState(() => _errorMessage = null),
-                  icon: const Icon(Icons.close_rounded, size: 18),
+                  icon: Icon(Icons.close_rounded, size: 18),
                   visualDensity: VisualDensity.compact,
                 ),
               ],
@@ -673,13 +635,13 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
             ),
           ),
           if (_busyAction == 'playlists' || _busyAction == 'tracks')
-            const SizedBox.square(
+            SizedBox.square(
               dimension: 20,
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
         ],
       ),
-      const SizedBox(height: 14),
+      SizedBox(height: 14),
       if (!_connected)
         const _EmptySection(
           icon: Icons.lock_outline_rounded,
@@ -698,7 +660,7 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
             final dropdown = DropdownButtonFormField<String>(
               initialValue: _selectedPlaylistId,
               isExpanded: true,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Playlist Spotify',
                 prefixIcon: Icon(Icons.queue_music_rounded),
               ),
@@ -719,21 +681,21 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
               onPressed: _busyAction == null && _selectedPlaylistId != null
                   ? _loadPlaylistTracks
                   : null,
-              icon: const Icon(Icons.download_for_offline_outlined, size: 18),
-              label: const Text('Carica brani'),
+              icon: Icon(Icons.download_for_offline_outlined, size: 18),
+              label: Text('Carica brani'),
             );
             if (constraints.maxWidth /
                     MediaQuery.textScalerOf(context).scale(1) <
                 560) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [dropdown, const SizedBox(height: 10), loadButton],
+                children: [dropdown, SizedBox(height: 10), loadButton],
               );
             }
             return Row(
               children: [
                 Expanded(child: dropdown),
-                const SizedBox(width: 10),
+                SizedBox(width: 10),
                 loadButton,
               ],
             );
@@ -758,13 +720,13 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
           if (_tracks.isNotEmpty)
             Text(
               '${_tracks.length} brani',
-              style: Theme.of(
-                context,
-              ).textTheme.labelLarge?.copyWith(color: const Color(0xFF68796F)),
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
         ],
       ),
-      const SizedBox(height: 14),
+      SizedBox(height: 14),
       Wrap(
         spacing: 10,
         runSpacing: 10,
@@ -774,11 +736,11 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
                 ? _importTestTracks
                 : null,
             icon: _busyAction == 'import'
-                ? const SizedBox.square(
+                ? SizedBox.square(
                     dimension: 17,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.playlist_add_rounded, size: 18),
+                : Icon(Icons.playlist_add_rounded, size: 18),
             label: Text(
               _busyAction == 'import'
                   ? 'Importazione...'
@@ -789,19 +751,19 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
             onPressed: _busyAction == null
                 ? () => _importTrackIds([AppConfig.testTrackIds.first])
                 : null,
-            icon: const Icon(Icons.science_outlined, size: 18),
-            label: const Text('Prova un ID'),
+            icon: Icon(Icons.science_outlined, size: 18),
+            label: Text('Prova un ID'),
           ),
         ],
       ),
-      const SizedBox(height: 12),
+      SizedBox(height: 12),
       LayoutBuilder(
         builder: (context, constraints) {
           final input = TextField(
             controller: _trackInput,
             enabled: _connected && _busyAction == null,
             onSubmitted: (_) => _importManualTrack(),
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'ID o link Spotify del brano',
               hintText: 'spotify:track:… oppure open.spotify.com/track/…',
               prefixIcon: Icon(Icons.link_rounded),
@@ -811,40 +773,40 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
             onPressed: _connected && _busyAction == null
                 ? _importManualTrack
                 : null,
-            icon: const Icon(Icons.add_rounded, size: 18),
-            label: const Text('Importa'),
+            icon: Icon(Icons.add_rounded, size: 18),
+            label: Text('Importa'),
           );
           if (constraints.maxWidth / MediaQuery.textScalerOf(context).scale(1) <
               560) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [input, const SizedBox(height: 8), submit],
+              children: [input, SizedBox(height: 8), submit],
             );
           }
           return Row(
             children: [
               Expanded(child: input),
-              const SizedBox(width: 10),
+              SizedBox(width: 10),
               submit,
             ],
           );
         },
       ),
       if (_importResults.any((result) => result.error != null)) ...[
-        const SizedBox(height: 14),
+        SizedBox(height: 14),
         ..._importResults
             .where((result) => result.error != null)
             .map(
               (result) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
+                padding: EdgeInsets.only(bottom: 6),
                 child: Text(
                   '${result.trackId}: ${result.error}',
-                  style: const TextStyle(color: Color(0xFF9C4528)),
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               ),
             ),
       ],
-      const SizedBox(height: 18),
+      SizedBox(height: 18),
       if (_tracks.isEmpty)
         const _EmptySection(
           icon: Icons.album_outlined,
@@ -853,9 +815,11 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
       else
         Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFFDCE5DC)),
+            border: Border.all(
+              color: Theme.of(context).colorScheme.outlineVariant,
+            ),
           ),
           child: Column(
             children: [
@@ -871,8 +835,7 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
                     builder: (_) => AudioMatchDialog(track: _tracks[index]),
                   ),
                 ),
-                if (index != _tracks.length - 1)
-                  const Divider(height: 1, indent: 64),
+                if (index != _tracks.length - 1) Divider(height: 1, indent: 64),
               ],
             ],
           ),
@@ -882,7 +845,7 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
 }
 
 class _SetupStatus {
-  const _SetupStatus(this.label, this.value, this.complete);
+  _SetupStatus(this.label, this.value, this.complete);
 
   final String label;
   final String value;
@@ -897,7 +860,7 @@ class _StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+    padding: EdgeInsets.symmetric(horizontal: 10, vertical: 7),
     decoration: BoxDecoration(
       color: color.withValues(alpha: 0.1),
       borderRadius: BorderRadius.circular(20),
@@ -930,11 +893,11 @@ class _SectionHeading extends StatelessWidget {
       Text(
         eyebrow,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-          color: const Color(0xFFB6603C),
+          color: Theme.of(context).colorScheme.secondary,
           fontWeight: FontWeight.w800,
         ),
       ),
-      const SizedBox(height: 3),
+      SizedBox(height: 3),
       Text(
         title,
         style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -955,18 +918,23 @@ class _EmptySection extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     width: double.infinity,
-    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
+    padding: EdgeInsets.symmetric(horizontal: 18, vertical: 20),
     decoration: BoxDecoration(
-      color: Colors.white.withValues(alpha: 0.72),
-      border: Border.all(color: const Color(0xFFDCE5DC)),
+      color: Theme.of(context).colorScheme.surface,
+      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       borderRadius: BorderRadius.circular(9),
     ),
     child: Row(
       children: [
-        Icon(icon, color: const Color(0xFF738579)),
-        const SizedBox(width: 12),
+        Icon(icon, color: Theme.of(context).colorScheme.onSurfaceVariant),
+        SizedBox(width: 12),
         Expanded(
-          child: Text(label, style: const TextStyle(color: Color(0xFF68796F))),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
         ),
       ],
     ),
@@ -994,7 +962,7 @@ class _TrackRow extends StatelessWidget {
     final minutes = track.durationMs ~/ 60000;
     final seconds = (track.durationMs % 60000) ~/ 1000;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       child: Row(
         children: [
           ClipRRect(
@@ -1002,27 +970,29 @@ class _TrackRow extends StatelessWidget {
             child: SizedBox.square(
               dimension: 42,
               child: imageUrl == null
-                  ? const ColoredBox(
-                      color: Color(0xFFEAF0E9),
+                  ? ColoredBox(
+                      color: Theme.of(context).colorScheme.surfaceContainerLow,
                       child: Icon(
                         Icons.album_outlined,
-                        color: Color(0xFF3B8065),
+                        color: Theme.of(context).colorScheme.primary,
                       ),
                     )
                   : Image.network(
                       imageUrl,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => const ColoredBox(
-                        color: Color(0xFFEAF0E9),
+                      errorBuilder: (_, _, _) => ColoredBox(
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerLow,
                         child: Icon(
                           Icons.album_outlined,
-                          color: Color(0xFF3B8065),
+                          color: Theme.of(context).colorScheme.primary,
                         ),
                       ),
                     ),
             ),
           ),
-          const SizedBox(width: 12),
+          SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1031,49 +1001,51 @@ class _TrackRow extends StatelessWidget {
                   track.title,
                   maxLines: compact ? 2 : 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Color(0xFF183A32),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 3),
+                SizedBox(height: 3),
                 Text(
                   '${track.artistLine}${track.album.isEmpty ? '' : '  ·  ${track.album}'}',
                   maxLines: compact ? 3 : 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Color(0xFF68796F),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontSize: 12,
                   ),
                 ),
                 if (compact) ...[
-                  const SizedBox(height: 4),
+                  SizedBox(height: 4),
                   Text(
                     '$minutes:${seconds.toString().padLeft(2, '0')}',
-                    style: const TextStyle(color: Color(0xFF68796F)),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
                 TextButton.icon(
                   onPressed: onYoutube,
-                  icon: const Icon(Icons.video_library_outlined),
-                  label: const Text('YouTube / MP3'),
+                  icon: Icon(Icons.video_library_outlined),
+                  label: Text('YouTube / MP3'),
                 ),
               ],
             ),
           ),
-          if (!compact) const SizedBox(width: 12),
+          if (!compact) SizedBox(width: 12),
           if (!compact)
             Text(
               '$minutes:${seconds.toString().padLeft(2, '0')}',
-              style: const TextStyle(
-                color: Color(0xFF68796F),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontFeatures: [FontFeature.tabularFigures()],
               ),
             ),
           IconButton(
             tooltip: 'Cerca una fonte audio autorizzata',
             onPressed: onFindAudio,
-            icon: const Icon(Icons.library_music_outlined),
+            icon: Icon(Icons.library_music_outlined),
           ),
         ],
       ),

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import '../../theme/syncbeat_theme.dart';
 
 import '../../config/app_config.dart';
 import '../../models/spotify_models.dart';
@@ -63,7 +64,7 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
           ),
           _local,
         ]);
-    _matcher = widget.matcher ?? const TrackMatcher();
+    _matcher = widget.matcher ?? TrackMatcher();
   }
 
   @override
@@ -103,14 +104,14 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
           context: context,
           builder: (context) => StatefulBuilder(
             builder: (context, setDialogState) => AlertDialog(
-              title: const Text('Diritti sul file'),
+              title: Text('Diritti sul file'),
               content: CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
                 value: confirmed,
                 onChanged: (value) => setDialogState(() {
                   confirmed = value ?? false;
                 }),
-                title: const Text(
+                title: Text(
                   'Confermo di avere il diritto di usare questo MP3 offline.',
                 ),
                 controlAffinity: ListTileControlAffinity.leading,
@@ -118,13 +119,13 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context, false),
-                  child: const Text('Annulla'),
+                  child: Text('Annulla'),
                 ),
                 FilledButton(
                   onPressed: confirmed
                       ? () => Navigator.pop(context, true)
                       : null,
-                  child: const Text('Continua'),
+                  child: Text('Continua'),
                 ),
               ],
             ),
@@ -153,7 +154,7 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
       final candidate = await showDialog<AudioCandidate>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Associa un MP3 al brano'),
+          title: Text('Associa un MP3 al brano'),
           content: SizedBox(
             width: 520,
             child: ListView(
@@ -161,7 +162,7 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
               children: candidates
                   .map(
                     (item) => ListTile(
-                      leading: const Icon(Icons.audio_file_rounded),
+                      leading: Icon(Icons.audio_file_rounded),
                       title: Text(item.title),
                       subtitle: Text(
                         '${item.artist.isEmpty ? 'Artista non disponibile' : item.artist} · ${_formatDuration(item.durationSeconds)}',
@@ -175,7 +176,7 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Annulla'),
+              child: Text('Annulla'),
             ),
           ],
         ),
@@ -206,7 +207,7 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
       _downloading = true;
       _cancellationToken = cancellationToken;
       _errorMessage = null;
-      _progress = const DownloadProgress(receivedBytes: 0);
+      _progress = DownloadProgress(receivedBytes: 0);
     });
     try {
       final stagedFile = await _downloads.download(
@@ -247,7 +248,7 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
               widget.track.artistLine,
               style: Theme.of(context).textTheme.bodyMedium,
             ),
-            const SizedBox(height: 18),
+            SizedBox(height: 18),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -260,44 +261,46 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
                           builder: (_) =>
                               YoutubeMatchDialog(track: widget.track),
                         ),
-                  icon: const Icon(Icons.video_library),
-                  label: const Text('YouTube · ricerca principale'),
+                  icon: Icon(Icons.video_library),
+                  label: Text('YouTube · ricerca principale'),
                 ),
                 FilledButton.icon(
                   onPressed: _searching || _downloading ? null : _searchJamendo,
                   icon: _searching
-                      ? const SizedBox.square(
+                      ? SizedBox.square(
                           dimension: 17,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Icon(Icons.search_rounded, size: 18),
-                  label: const Text('Cerca su Jamendo'),
+                      : Icon(Icons.search_rounded, size: 18),
+                  label: Text('Cerca su Jamendo'),
                 ),
                 OutlinedButton.icon(
                   onPressed: _searching || _downloading ? null : _pickLocalMp3,
-                  icon: const Icon(Icons.folder_open_rounded, size: 18),
-                  label: const Text('Scegli MP3 locale'),
+                  icon: Icon(Icons.folder_open_rounded, size: 18),
+                  label: Text('Scegli MP3 locale'),
                 ),
               ],
             ),
             if (!_jamendo.isConfigured) ...[
-              const SizedBox(height: 10),
-              const Text(
+              SizedBox(height: 10),
+              Text(
                 'Jamendo richiede JAMENDO_CLIENT_ID configurato con --dart-define.',
-                style: TextStyle(color: Color(0xFF68796F)),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
             if (_errorMessage != null) ...[
-              const SizedBox(height: 12),
+              SizedBox(height: 12),
               Text(
                 _errorMessage!,
-                style: const TextStyle(color: Color(0xFF9C4528)),
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
             ],
             if (_result != null) ...[
-              const SizedBox(height: 16),
+              SizedBox(height: 16),
               _buildResultSummary(context),
-              const SizedBox(height: 8),
+              SizedBox(height: 8),
               RadioGroup<AudioCandidate>(
                 groupValue: _selectedCandidate,
                 onChanged: (candidate) =>
@@ -311,9 +314,9 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
               ),
             ],
             if (_downloading) ...[
-              const SizedBox(height: 16),
+              SizedBox(height: 16),
               LinearProgressIndicator(value: _progress?.fraction),
-              const SizedBox(height: 6),
+              SizedBox(height: 6),
               Row(
                 children: [
                   Expanded(
@@ -325,24 +328,28 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
                   ),
                   TextButton.icon(
                     onPressed: () => _cancellationToken?.cancel(),
-                    icon: const Icon(Icons.close_rounded, size: 17),
-                    label: const Text('Annulla'),
+                    icon: Icon(Icons.close_rounded, size: 17),
+                    label: Text('Annulla'),
                   ),
                 ],
               ),
             ],
             if (_stagedFile != null) ...[
-              const SizedBox(height: 12),
+              SizedBox(height: 12),
               Text(
                 'Salvato nello staging: ${_stagedFile!.fileName} · ${_formatBytes(_stagedFile!.sizeBytes)}',
-                style: const TextStyle(color: Color(0xFF28664D)),
+                style: TextStyle(
+                  color: SyncBeatStatusColors.of(context).success,
+                ),
               ),
             ],
             if (_result?.status == TrackMatchStatus.noMatch) ...[
-              const SizedBox(height: 14),
-              const Text(
+              SizedBox(height: 14),
+              Text(
                 'Nessuna corrispondenza verificata. Non è disponibile alcun download.',
-                style: TextStyle(color: Color(0xFF68796F)),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           ],
@@ -356,7 +363,7 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
               !_downloading && _downloads.canDownload(_selectedCandidate!)
               ? _downloadSelected
               : null,
-          icon: const Icon(Icons.download_rounded, size: 18),
+          icon: Icon(Icons.download_rounded, size: 18),
           label: Text(
             _selectedCandidate!.isLocalFile
                 ? 'Copia nello staging'
@@ -365,7 +372,7 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
         ),
       TextButton(
         onPressed: () => Navigator.pop(context),
-        child: const Text('Chiudi'),
+        child: Text('Chiudi'),
       ),
     ],
   );
@@ -399,10 +406,12 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
         ? candidate.license.name
         : '${candidate.license.name} · ${candidate.license.restrictionReason}';
     return Container(
-      margin: const EdgeInsets.only(top: 8),
+      margin: EdgeInsets.only(top: 8),
       decoration: BoxDecoration(
         border: Border.all(
-          color: selected ? const Color(0xFF3B8065) : const Color(0xFFDCE5DC),
+          color: selected
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.outlineVariant,
         ),
         borderRadius: BorderRadius.circular(8),
       ),
@@ -414,7 +423,7 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
           overflow: TextOverflow.ellipsis,
         ),
         subtitle: Padding(
-          padding: const EdgeInsets.only(top: 4),
+          padding: EdgeInsets.only(top: 4),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -431,8 +440,8 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
                     candidate.sourceUrl!,
                     mode: LaunchMode.externalApplication,
                   ),
-                  icon: const Icon(Icons.open_in_new_rounded, size: 15),
-                  label: const Text('Apri pagina della fonte'),
+                  icon: Icon(Icons.open_in_new_rounded, size: 15),
+                  label: Text('Apri pagina della fonte'),
                 ),
               if (candidate.quality != null)
                 Text('Qualità: ${candidate.quality}'),
