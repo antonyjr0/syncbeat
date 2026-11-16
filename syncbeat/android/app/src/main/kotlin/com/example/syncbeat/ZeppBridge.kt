@@ -33,6 +33,7 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
     private val timer = Executors.newSingleThreadScheduledExecutor()
     private val running = AtomicBoolean(false)
     @Volatile private var socket: BluetoothSocket? = null
+    @Volatile private var timedOutFlag = false
     private var pendingDevices: MethodChannel.Result? = null
 
     fun handle(method: String, args: Map<String, Any?>, result: MethodChannel.Result) {
@@ -64,11 +65,21 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
     private fun adapter(): BluetoothAdapter? =
         activity.getSystemService(BluetoothManager::class.java)?.adapter
 
+    private fun scanAsked() =
+        Build.VERSION.SDK_INT < 31 ||
+            activity.getSharedPreferences("zepp_bridge", 0).getBoolean("scan_asked", false)
+
     private fun devices(result: MethodChannel.Result) {
-        if (!hasPermission()) {
+        if (!hasPermission() || !scanAsked()) {
+            activity.getSharedPreferences("zepp_bridge", 0).edit().putBoolean("scan_asked", true).apply()
             pendingDevices?.error("CANCELLED", "Richiesta permesso sostituita", null)
             pendingDevices = result
-            activity.requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_CONNECT)
+            // BLUETOOTH_SCAN serve solo a fermare una ricerca in corso (cancelDiscovery); se negato si prosegue.
+            activity.requestPermissions(
+                if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN)
+                else arrayOf(Manifest.permission.BLUETOOTH_CONNECT),
+                REQUEST_CONNECT,
+            )
             return
         }
         listDevices(result)
@@ -111,7 +122,7 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
         val artist = args["artist"] as? String ?: ""
         val timeout = if (send) 720L else 120L
         var deadline: ScheduledFuture<*>? = null
-        var timedOut = false
+        timedOutFlag = false
         worker.execute {
             val chars = keyText?.toCharArray() ?: CharArray(0)
             var key: ByteArray? = null
@@ -128,10 +139,9 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
                     data = readMp3(requireNotNull(path) { "File mancante" })
                 }
                 status("Apertura connessione Classic...")
-                val candidate = device.createRfcommSocketToServiceRecord(UUID.fromString(ZeppSession.SERIAL_UUID))
-                socket = candidate
-                deadline = timer.schedule({ timedOut = true; closeSocket() }, timeout, TimeUnit.SECONDS)
-                candidate.connect()
+                stopDiscovery()
+                deadline = timer.schedule({ timedOutFlag = true; closeSocket() }, timeout, TimeUnit.SECONDS)
+                val candidate = connectClassic(device)
                 session = ZeppSession(candidate.inputStream, candidate.outputStream, object : ZeppSession.Events {
                     override fun status(text: String) = this@ZeppBridge.status(text)
                     override fun progress(acknowledgedBytes: Int, total: Int) {
@@ -144,7 +154,7 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
                 activity.runOnUiThread { result.success(mapOf("sent" to sent)) }
             } catch (error: Exception) {
                 val message = when {
-                    timedOut -> "Tempo massimo superato. Nessun tentativo automatico: controlla l'orologio prima di riprovare."
+                    timedOutFlag -> "Tempo massimo superato. Nessun tentativo automatico: controlla l'orologio prima di riprovare."
                     error is IOException -> error.message ?: "Errore Bluetooth"
                     else -> "Operazione non riuscita. Controlla permessi, Bluetooth e stato dell'orologio."
                 }
@@ -159,6 +169,58 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
                 running.set(false)
             }
         }
+    }
+
+
+    /**
+     * Ferma una eventuale ricerca Bluetooth in corso prima di connettersi
+     * (come fanno Gadgetbridge e OronBox). Se il permesso di scansione manca
+     * si prosegue comunque.
+     */
+    @Suppress("MissingPermission")
+    private fun stopDiscovery() {
+        if (Build.VERSION.SDK_INT >= 31 &&
+            activity.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED
+        ) return
+        try {
+            val a = adapter()
+            if (a != null && a.isDiscovering) a.cancelDiscovery()
+        } catch (_: SecurityException) {
+        }
+    }
+
+    /**
+     * Una sola sequenza per ogni pressione dell'utente, sullo stesso servizio
+     * Zepp (UUID 00000022-...): prima socket "insecure" e poi, se fallisce,
+     * socket standard. E' l'ordine usato da OronBox per questo profilo; nessun
+     * canale indovinato, nessun removeBond, nessun ritentativo automatico dopo.
+     * Nei messaggi finiscono solo fase ed eccezione, mai chiavi o indirizzi.
+     */
+    @Suppress("MissingPermission")
+    private fun connectClassic(device: BluetoothDevice): BluetoothSocket {
+        val uuid = UUID.fromString(ZeppSession.SERIAL_UUID)
+        val failures = ArrayList<String>()
+        for (insecure in listOf(true, false)) {
+            val label = if (insecure) "insecure" else "standard"
+            val started = System.currentTimeMillis()
+            try {
+                status("Connessione Classic ($label)...")
+                val candidate =
+                    if (insecure) device.createInsecureRfcommSocketToServiceRecord(uuid)
+                    else device.createRfcommSocketToServiceRecord(uuid)
+                socket = candidate
+                candidate.connect()
+                android.util.Log.i("SyncBeatZepp", "Classic $label connesso in ${System.currentTimeMillis() - started} ms")
+                return candidate
+            } catch (error: Exception) {
+                val elapsed = System.currentTimeMillis() - started
+                android.util.Log.w("SyncBeatZepp", "Classic $label fallito dopo $elapsed ms: ${error.javaClass.simpleName}")
+                failures += "$label: ${error.javaClass.simpleName} dopo $elapsed ms"
+                closeSocket()
+                if (timedOutFlag) throw IOException("Tempo massimo superato.")
+            }
+        }
+        throw IOException("Connessione Classic non riuscita (" + failures.joinToString("; ") + "). Controlla che l'orologio sia vicino e connesso, poi riprova.")
     }
 
     private fun status(text: String) = activity.runOnUiThread { events?.success(mapOf("type" to "status", "text" to text)) }
