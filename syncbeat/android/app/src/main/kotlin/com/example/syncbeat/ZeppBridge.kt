@@ -190,37 +190,27 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
     }
 
     /**
-     * Una sola sequenza per ogni pressione dell'utente, sullo stesso servizio
-     * Zepp (UUID 00000022-...): prima socket "insecure" e poi, se fallisce,
-     * socket standard. E' l'ordine usato da OronBox per questo profilo; nessun
-     * canale indovinato, nessun removeBond, nessun ritentativo automatico dopo.
-     * Nei messaggi finiscono solo fase ed eccezione, mai chiavi o indirizzi.
+     * Un solo tentativo esplicito per pressione, come prima: socket standard sul
+     * servizio Zepp (UUID 00000022-...), la stessa scelta di Gadgetbridge. Nessun
+     * fallback automatico (insecure, canali, removeBond). Nei log e nel messaggio
+     * finiscono solo tipo di eccezione e millisecondi, mai chiavi o indirizzi.
      */
     @Suppress("MissingPermission")
     private fun connectClassic(device: BluetoothDevice): BluetoothSocket {
-        val uuid = UUID.fromString(ZeppSession.SERIAL_UUID)
-        val failures = ArrayList<String>()
-        for (insecure in listOf(true, false)) {
-            val label = if (insecure) "insecure" else "standard"
-            val started = System.currentTimeMillis()
-            try {
-                status("Connessione Classic ($label)...")
-                val candidate =
-                    if (insecure) device.createInsecureRfcommSocketToServiceRecord(uuid)
-                    else device.createRfcommSocketToServiceRecord(uuid)
-                socket = candidate
-                candidate.connect()
-                android.util.Log.i("SyncBeatZepp", "Classic $label connesso in ${System.currentTimeMillis() - started} ms")
-                return candidate
-            } catch (error: Exception) {
-                val elapsed = System.currentTimeMillis() - started
-                android.util.Log.w("SyncBeatZepp", "Classic $label fallito dopo $elapsed ms: ${error.javaClass.simpleName}")
-                failures += "$label: ${error.javaClass.simpleName} dopo $elapsed ms"
-                closeSocket()
-                if (timedOutFlag) throw IOException("Tempo massimo superato.")
-            }
+        val started = System.currentTimeMillis()
+        try {
+            val candidate = device.createRfcommSocketToServiceRecord(UUID.fromString(ZeppSession.SERIAL_UUID))
+            socket = candidate
+            candidate.connect()
+            android.util.Log.i("SyncBeatZepp", "Classic connesso in ${System.currentTimeMillis() - started} ms")
+            return candidate
+        } catch (error: Exception) {
+            val elapsed = System.currentTimeMillis() - started
+            android.util.Log.w("SyncBeatZepp", "Classic fallito dopo $elapsed ms: ${error.javaClass.simpleName}")
+            closeSocket()
+            if (timedOutFlag) throw IOException("Tempo massimo superato.")
+            throw IOException("Connessione Classic non riuscita (${error.javaClass.simpleName} dopo $elapsed ms: ${error.message ?: "senza dettaglio"}). Nessun tentativo automatico: controlla l'orologio prima di riprovare.")
         }
-        throw IOException("Connessione Classic non riuscita (" + failures.joinToString("; ") + "). Controlla che l'orologio sia vicino e connesso, poi riprova.")
     }
 
     private fun status(text: String) = activity.runOnUiThread { events?.success(mapOf("type" to "status", "text" to text)) }

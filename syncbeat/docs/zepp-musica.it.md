@@ -133,13 +133,13 @@ parte Zepp di SyncBeat e' **AGPL-3.0-or-later**. Il testo MIT originale resta in
 Il vecchio prototipo separato in `experiments/zepp-music/` resta nella storia
 del branch solo come riferimento. **Non serve compilarlo.**
 
-## Aggiornamento 16/11/2026 (sera): connessione Classic allineata a OronBox
+## Aggiornamento 16/11/2026 (sera): connessione Classic, confronto con OronBox
 
 Errore osservato su "Verifica collegamento": `Reaf failed, socket might closed or timeout, ready ret: -1`, quasi immediato, prima dell'autenticazione. La causa non e' dimostrata. Cosa cambia in `ZeppBridge.kt`, confrontando con il profilo Zepp di OronBox (https://github.com/zxor-org/OronBox, `MainActivity.kt` e `device_profile.dart`):
 
 - Stesso servizio di prima (UUID `00000022-0000-3512-2118-0009af100700`), nessun canale RFCOMM indovinato, nessun `removeBond`.
 - Prima di connettersi si ferma una ricerca Bluetooth in corso (`cancelDiscovery`, come Gadgetbridge e OronBox). Serve il permesso `BLUETOOTH_SCAN` (solo Android 12+, "senza posizione"); se lo neghi si prosegue lo stesso.
-- Per ogni pressione del pulsante: prima socket "insecure", poi, se fallisce, socket standard (ordine di OronBox; fin qui SyncBeat usava solo la standard). Dopo non ci sono altri tentativi automatici.
-- Se fallisce, il messaggio indica fase e tipo di errore con i millisecondi (es. `insecure: IOException dopo 12 ms`), mai chiave o indirizzo.
+- Resta un solo tentativo per pressione, con la socket standard come prima (stessa scelta di Gadgetbridge). OronBox prova prima una socket "insecure": non l'ho adottata, e' una scelta aperta da decidere con un test, non in automatico.
+- Se fallisce, il messaggio indica fase e tipo di errore con i millisecondi (es. `IOException dopo 12 ms`), mai chiave o indirizzo.
 
-Il codice e' scritto qui e usa solo API Android standard: da OronBox sono state prese l'ordine dei tentativi e l'UUID, non il testo del codice. OronBox e' AGPL-3.0 con termini aggiuntivi (obbligo di attribuzione se se ne distribuisce codice); chi la cita come origine non ne e' limitato. Non e' una garanzia che l'orologio risponda: si sa solo dopo il test.
+Il codice e' scritto qui e usa solo API Android standard: da OronBox e' stato preso solo il confronto (UUID, cancelDiscovery), non il testo del codice. OronBox e' AGPL-3.0 con termini aggiuntivi (obbligo di attribuzione se se ne distribuisce codice); chi la cita come origine non ne e' limitato. Non e' una garanzia che l'orologio risponda: si sa solo dopo il test.
