@@ -11,6 +11,7 @@ import java.io.File
 
 class MainActivity : FlutterActivity() {
     private val publicAudio by lazy { PublicAudioBridge(this) }
+    private val zepp by lazy { ZeppBridge(this, publicAudio) }
     private var player: MediaPlayer? = null
     private var pendingPlayback: MethodChannel.Result? = null
     private var playbackError: String? = null
@@ -22,6 +23,16 @@ class MainActivity : FlutterActivity() {
                 publicAudio.handle(call.method, call.arguments as? Map<String, Any> ?: emptyMap(), result)
             } catch (error: Exception) { result.error("STORAGE", error.message, null) }
         }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "syncbeat/zepp").setMethodCallHandler { call, result ->
+            try {
+                @Suppress("UNCHECKED_CAST")
+                zepp.handle(call.method, call.arguments as? Map<String, Any?> ?: emptyMap(), result)
+            } catch (error: Exception) { result.error("ZEPP", error.message, null) }
+        }
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, "syncbeat/zepp/events").setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink) { zepp.events = events }
+            override fun onCancel(arguments: Any?) { zepp.events = null }
+        })
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, "syncbeat/youtube/events").setStreamHandler(object : EventChannel.StreamHandler {
             override fun onListen(arguments: Any?, events: EventChannel.EventSink) { YoutubeJobs.events = events }
             override fun onCancel(arguments: Any?) { YoutubeJobs.events = null }
@@ -89,6 +100,9 @@ class MainActivity : FlutterActivity() {
     }
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (!publicAudio.onActivityResult(requestCode, resultCode, data)) super.onActivityResult(requestCode, resultCode, data)
+    }
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        if (!zepp.onRequestPermissionsResult(requestCode, grantResults)) super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
     override fun onDestroy() { player?.release(); player = null; super.onDestroy() }
 }

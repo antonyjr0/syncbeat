@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
+import '../zepp/zepp_transfer_dialog.dart';
 import 'staging_storage.dart';
 import 'public_audio_storage.dart';
 
@@ -195,10 +196,22 @@ class _LocalAudioLibraryState extends State<LocalAudioLibrary> {
                     leading: const Icon(Icons.audio_file),
                     title: Text(_files[i].name),
                     subtitle: Text(_files[i].path),
-                    trailing: IconButton(
-                      tooltip: 'Riproduci',
-                      onPressed: () => _play(_files[i]),
-                      icon: const Icon(Icons.play_arrow),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_android)
+                          IconButton(
+                            tooltip: 'Invia all\'orologio (sperimentale)',
+                            onPressed: () =>
+                                showZeppTransferDialog(context, _files[i]),
+                            icon: const Icon(Icons.watch),
+                          ),
+                        IconButton(
+                          tooltip: 'Riproduci',
+                          onPressed: () => _play(_files[i]),
+                          icon: const Icon(Icons.play_arrow),
+                        ),
+                      ],
                     ),
                   ),
                 ),
