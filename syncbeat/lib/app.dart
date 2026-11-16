@@ -537,7 +537,11 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
       ),
       const _SetupStatus('Download offline', 'Autorizzazione richiesta', false),
       const _SetupStatus('Cartella staging', 'Directory privata app', false),
-      const _SetupStatus('Handoff Zepp', 'Importazione manuale', false),
+      const _SetupStatus(
+        'Handoff Zepp',
+        'Manuale, o invio diretto da MP3 locali (sperimentale, Android)',
+        false,
+      ),
       const _SetupStatus('Database Appwrite', 'Da collegare', false),
     ];
     return Column(
