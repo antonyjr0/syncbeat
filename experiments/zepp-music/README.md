@@ -1,5 +1,9 @@
 # SyncBeat Zepp Lab
 
+> **Superato.** La funzione e' ora dentro l'app Flutter SyncBeat: leggi
+> [syncbeat/docs/zepp-musica.it.md](../../syncbeat/docs/zepp-musica.it.md).
+> Questa app separata resta solo come riferimento; non serve compilarla.
+
 Prototipo Android separato per importare **un MP3 locale nel lettore Musica
 originale dell'Active 3 Premium** tramite Bluetooth Classic/RFCOMM.
 
