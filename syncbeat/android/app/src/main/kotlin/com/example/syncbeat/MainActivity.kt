@@ -12,6 +12,8 @@ import java.io.File
 class MainActivity : FlutterActivity() {
     private val publicAudio by lazy { PublicAudioBridge(this) }
     private val zepp by lazy { ZeppBridge(this, publicAudio) }
+    // Flusso di riferimento per confronto (branch experiment/zepp-flusso-riferimento): canali separati, nessuna pagina nuova.
+    private val zeppRef by lazy { RefBridge(this, publicAudio) }
     private var player: MediaPlayer? = null
     private var pendingPlayback: MethodChannel.Result? = null
     private var playbackError: String? = null
@@ -32,6 +34,16 @@ class MainActivity : FlutterActivity() {
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, "syncbeat/zepp/events").setStreamHandler(object : EventChannel.StreamHandler {
             override fun onListen(arguments: Any?, events: EventChannel.EventSink) { zepp.events = events }
             override fun onCancel(arguments: Any?) { zepp.events = null }
+        })
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "syncbeat/zepp_ref").setMethodCallHandler { call, result ->
+            try {
+                @Suppress("UNCHECKED_CAST")
+                zeppRef.handle(call.method, call.arguments as? Map<String, Any?> ?: emptyMap(), result)
+            } catch (error: Exception) { result.error("ZEPP_REF", error.message, null) }
+        }
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, "syncbeat/zepp_ref/events").setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink) { zeppRef.events = events }
+            override fun onCancel(arguments: Any?) { zeppRef.events = null }
         })
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, "syncbeat/youtube/events").setStreamHandler(object : EventChannel.StreamHandler {
             override fun onListen(arguments: Any?, events: EventChannel.EventSink) { YoutubeJobs.events = events }
@@ -102,7 +114,8 @@ class MainActivity : FlutterActivity() {
         if (!publicAudio.onActivityResult(requestCode, resultCode, data)) super.onActivityResult(requestCode, resultCode, data)
     }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        if (!zepp.onRequestPermissionsResult(requestCode, grantResults)) super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (!zepp.onRequestPermissionsResult(requestCode, grantResults) &&
+            !zeppRef.onRequestPermissionsResult(requestCode, grantResults)) super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
     override fun onDestroy() { player?.release(); player = null; super.onDestroy() }
 }
