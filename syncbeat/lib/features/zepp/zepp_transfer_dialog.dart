@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 
 import '../audio_sources/public_audio_storage.dart';
 import 'zepp_client.dart';
+import 'zepp_ref_client.dart';
 
 /// Finestra di dialogo, aperta dall'elenco "MP3 locali" gia' esistente, per
 /// inviare un MP3 gia' scaricato al lettore Musica dell'orologio.
@@ -50,12 +51,14 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog> {
   double? _progress;
   String? _status;
   bool _failed = false;
+  bool _useRef = false;
 
-  @override
-  void initState() {
-    super.initState();
-    unawaited(widget.client.secureScreen(true));
-    _sub = (widget.events ?? widget.client.events).listen((event) {
+  /// Il client attivo: quello abituale, oppure il flusso di riferimento
+  /// (implementazione separata da Gadgetbridge/OronBox) se l'interruttore e' acceso.
+  ZeppClient get _client => _useRef ? const ZeppRefClient() : widget.client;
+
+  void _listen() {
+    _sub = (widget.events ?? _client.events).listen((event) {
       if (!mounted || !_busy) return;
       setState(() {
         if (event.isProgress) {
@@ -67,9 +70,29 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog> {
     }, onError: (_) {});
   }
 
+  Future<void> _setRef(bool value) async {
+    if (_busy) return;
+    await _sub?.cancel();
+    setState(() {
+      _useRef = value;
+      _devices = const [];
+      _device = null;
+      _status = null;
+      _failed = false;
+    });
+    _listen();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_client.secureScreen(true));
+    _listen();
+  }
+
   @override
   void dispose() {
-    unawaited(widget.client.secureScreen(false));
+    unawaited(_client.secureScreen(false));
     _sub?.cancel();
     _key.clear();
     _key.dispose();
@@ -85,7 +108,7 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog> {
       _status = null;
     });
     try {
-      final devices = await widget.client.devices();
+      final devices = await _client.devices();
       if (!mounted) return;
       setState(() {
         _devices = devices;
@@ -166,7 +189,7 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog> {
     });
     try {
       if (send) {
-        await widget.client.send(
+        await _client.send(
           device: device,
           key: key,
           path: widget.file.path,
@@ -174,7 +197,7 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog> {
           artist: _artist.text,
         );
       } else {
-        await widget.client.verify(device: device, key: key);
+        await _client.verify(device: device, key: key);
       }
       if (!mounted) return;
       setState(() {
@@ -197,7 +220,7 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog> {
   }
 
   Future<void> _licenses() async {
-    final text = await widget.client.licenses();
+    final text = await _client.licenses();
     if (!mounted) return;
     await showDialog<void>(
       context: context,
@@ -249,6 +272,18 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog> {
                   'non viene salvata ne\' inviata online e il campo si svuota quando parte l\'operazione.',
                 ),
               ),
+            ),
+            SwitchListTile(
+              key: const Key('zepp-ref-flow'),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Flusso di riferimento (confronto)'),
+              subtitle: const Text(
+                'Implementazione separata, scritta dalle fonti pubbliche '
+                '(Gadgetbridge e OronBox), per confronto con quella abituale. '
+                'Di norma spento: vedi docs/zepp-flusso-riferimento.it.md.',
+              ),
+              value: _useRef,
+              onChanged: _busy ? null : _setRef,
             ),
             const SizedBox(height: 12),
             ListTile(
@@ -324,7 +359,7 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog> {
                 ),
                 if (_busy)
                   TextButton(
-                    onPressed: () => widget.client.cancel(),
+                    onPressed: () => _client.cancel(),
                     child: const Text('Interrompi'),
                   ),
               ],

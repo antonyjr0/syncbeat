@@ -72,12 +72,12 @@ Antonio può dirlo.
 
 ## Come confrontare con l'implementazione locale
 
-Il punto di iniezione è un solo parametro: in
-`lib/features/zepp/zepp_transfer_dialog.dart` (righe 15 e 26) sostituire
-`const ZeppClient()` con `ZeppRefClient()` (e il tipo del campo), oppure — senza
-toccare il dialog — copiare `zepp_ref_client.dart` dove serve. Le API sono
-identiche (`devices`, `run`, `cancel`, stessi eventi di progresso), quindi il
-confronto è una sostituzione del canale platform usato.
+Il dialog "Invia all'orologio" ha un interruttore **"Flusso di riferimento
+(confronto)"** in cima: spento usa il flusso abituale (`ZeppClient`), acceso usa
+il riferimento (`ZeppRefClient`). Le API sono identiche, quindi il confronto e'
+solo la scelta del canale platform; il passaggio e' possibile solo a operazione
+ferma e ricarica l'elenco dei dispositivi. Per un confronto riga per riga del
+codice, i file `Ref*`/`zepp_ref*` restano affiancati a quelli esistenti.
 
 Ogni fase logga i millisecondi impiegati, quindi un eventuale blocco sul
 dispositivo si localizza sulla fase esatta invece che su un timeout generico.
