@@ -180,8 +180,14 @@ La dipendenza pubblicata `flutter_adb: 1.0.0` gestisce ADB, TLS e pairing SPAKE2
 SyncBeat non ne ricopia il protocollo. Le dipendenze e il provider Shizuku sono
 stati rimossi. Il collegamento e' limitato a `127.0.0.1`, non accetta host remoti
 e richiede Android 11+ con Debug wireless attivo. La schermata **Configura debug
-wireless (senza app aggiuntive)** separa porta/codice di abbinamento dalla porta
-principale di connessione. Usare lo schermo diviso per tenere aperto il codice.
+wireless (senza app aggiuntive)** apre **Debug wireless** con **Abbina dalla
+notifica**. Se Android mostra le Opzioni sviluppatore, apri **Debug wireless**
+da lì. Consenti le notifiche e scegli **Accoppia dispositivo
+con codice di accoppiamento** e lascia il codice visibile. Quando SyncBeat trova
+la porta di abbinamento del telefono, apri la tendina, scegli **Inserisci
+codice** nella notifica **Abbina SyncBeat** e invia le sei cifre. Dopo
+l'abbinamento, inserisci in SyncBeat la porta indicata nella pagina principale
+di Debug wireless e premi **Collega**.
 Il codice temporaneo non viene conservato; l'identita' RSA viene salvata tramite
 `flutter_secure_storage` e riusata. Il logging dettagliato del pacchetto e' spento.
 

@@ -121,6 +121,15 @@ class EmbeddedAdb {
     }
   }
 
+  Future<void> pairFromNotification() async {
+    // Prepare the keys before opening Settings, while the code is still fresh.
+    await _crypto();
+    final reply = await channel.invokeMapMethod<String, Object?>(
+      'pairFromNotification',
+    );
+    await pair(reply!['port'] as int, reply['code'] as String);
+  }
+
   Future<void> connect(int port) async {
     if (_active) {
       throw StateError(

@@ -105,5 +105,10 @@ class MainActivity : FlutterActivity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         if (!zepp.onRequestPermissionsResult(requestCode, grantResults)) super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
-    override fun onDestroy() { player?.release(); player = null; super.onDestroy() }
+    override fun onDestroy() {
+        zepp.closePairingNotification()
+        player?.release()
+        player = null
+        super.onDestroy()
+    }
 }
