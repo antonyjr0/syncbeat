@@ -168,7 +168,9 @@ public final class ZeppSession implements AutoCloseable {
     validateMetadata(artist);
     Wire.require(title.length() > 0, "Titolo obbligatorio");
     // Deliberately no speculative URL escaping: reject protocol separators in this prototype.
-    byte[] url = Wire.text("music://file?songName=" + title + "&singer=" + artist + "&end=1");
+    // The installed Zepp music flow supplies a space for an absent artist.
+    byte[] url = Wire.text("music://file?songName=" + title + "&singer="
+        + (artist.isEmpty() ? " " : artist) + "&end=1");
     byte[] name = Wire.text("syncbeat-test.mp3");
     ByteBuffer request = Wire.buffer(2 + url.length + name.length + 10);
     request
@@ -181,11 +183,7 @@ public final class ZeppSession implements AutoCloseable {
         .put((byte) 0)
         .put((byte) 0);
     sendService(13, request.array(), services.get(13));
-    ByteBuffer b = Wire.le(waitService(13));
-    Wire.require(
-        b.remaining() >= 7 && Wire.u(b.get()) == 4 && b.get() == 0 && b.get() == 0,
-        "Importazione rifiutata dall'orologio");
-    int offset = b.getInt();
+    int offset = parseUploadResponse(waitService(13));
     Wire.require(
         offset >= 0 && offset < mp3.length, "Offset ripresa non supportato: nessun dato inviato");
     // Avoid unsafe resume across sessions: first prototype intentionally starts at zero only.
@@ -219,10 +217,25 @@ public final class ZeppSession implements AutoCloseable {
             + " dell'orologio: non sono verificabili da qui.");
   }
 
+  // Response format from Gadgetbridge ZeppOsFileTransferV3: command, session,
+  // status, uint32 existing progress. Never include raw payloads or credentials.
+  static int parseUploadResponse(byte[] response) throws IOException {
+    Wire.require(response.length >= 3, "Risposta importazione incompleta (intestazione)");
+    ByteBuffer b = Wire.le(response);
+    int command = Wire.u(b.get()), transferSession = Wire.u(b.get()), status = Wire.u(b.get());
+    Wire.require(command == 4, "Risposta importazione inattesa (comando " + command + ")");
+    Wire.require(transferSession == 0, "Sessione importazione inattesa (" + transferSession + ")");
+    Wire.require(status == 0,
+        "Importazione rifiutata dall'orologio (codice " + status
+            + "). Nessun blocco audio inviato.");
+    Wire.require(b.remaining() >= 4, "Risposta importazione incompleta (avanzamento)");
+    return b.getInt();
+  }
+
   public static void validateMetadata(String s) throws IOException {
     Wire.require(
-        s != null && s.getBytes(StandardCharsets.UTF_8).length <= 200,
-        "Metadati troppo lunghi (massimo 200 byte)");
+        s != null && s.getBytes(StandardCharsets.UTF_8).length <= 31,
+        "Metadati troppo lunghi (massimo 31 byte)");
     for (char c : s.toCharArray())
       Wire.require(
           c >= 32 && c != 127 && "&?#%=".indexOf(c) < 0,

@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
-import '../zepp/zepp_transfer_dialog.dart';
+import '../zepp/zepp_handoff_dialog.dart';
 import 'staging_storage.dart';
 import 'public_audio_storage.dart';
 
@@ -201,9 +201,9 @@ class _LocalAudioLibraryState extends State<LocalAudioLibrary> {
                       children: [
                         if (_android)
                           IconButton(
-                            tooltip: 'Invia all\'orologio (sperimentale)',
+                            tooltip: 'Invia all’orologio',
                             onPressed: () =>
-                                showZeppTransferDialog(context, _files[i]),
+                                showWatchTransferOptions(context, _files[i]),
                             icon: const Icon(Icons.watch),
                           ),
                         IconButton(

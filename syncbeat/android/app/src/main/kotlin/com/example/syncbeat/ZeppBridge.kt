@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Esperimento: invio di un MP3 al lettore Musica di un orologio Zepp OS via
  * Bluetooth Classic. Ogni operazione e' esplicita (dispositivo scelto dall'utente,
  * una sola alla volta, nessun ritentativo automatico). La chiave di abbinamento
- * non viene salvata ne' registrata nei log.
+ * resta nell'archivio sicuro Flutter e non viene registrata nei log nativi.
  */
 class ZeppBridge(private val activity: Activity, private val publicAudio: PublicAudioBridge) {
     @Volatile var events: EventChannel.EventSink? = null
@@ -35,11 +35,75 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
     @Volatile private var socket: BluetoothSocket? = null
     @Volatile private var timedOutFlag = false
     private var pendingDevices: MethodChannel.Result? = null
+    private var bleProbe: ZeppBleProbe? = null
+    private val cancelled = AtomicBoolean(false)
+    private lateinit var adbChannel: MethodChannel
+    fun configureAdb(messenger: io.flutter.plugin.common.BinaryMessenger) {
+        adbChannel = MethodChannel(messenger, "syncbeat/embedded_adb")
+        adbChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "bootstrap" -> result.success(mapOf("apkPath" to activity.applicationInfo.sourceDir,
+                    "user" to android.os.Process.myUid() / 100000))
+                "leaseLost" -> { cancelled.set(true); closeSocket(); result.success(null) }
+                "settings" -> {
+                    activity.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+    private val coordination by lazy { ZeppAdbCoordinator(activity, adbChannel).also {
+        it.onHelperLost = { cancelled.set(true); closeSocket() }
+    } }
 
     fun handle(method: String, args: Map<String, Any?>, result: MethodChannel.Result) {
         when (method) {
             "devices" -> devices(result)
             "run" -> run(args, result)
+            "probeBle" -> probeBle(args, result)
+            "adbStatus" -> worker.execute {
+                try {
+                    if (!running.get()) coordination.restore()
+                    val state = coordination.status()
+                    activity.runOnUiThread { result.success(state) }
+                } catch (error: Exception) {
+                    activity.runOnUiThread { result.error("RESTORE", error.message, null) }
+                }
+            }
+            "authorizeAdb" -> worker.execute {
+                try { val ready = coordination.status()["state"] == "ready"; activity.runOnUiThread { result.success(ready) } }
+                catch (_: Exception) { activity.runOnUiThread { result.success(false) } }
+            }
+            "setZeppCoordination" -> {
+                worker.execute {
+                    try { coordination.setEnabled(args["enabled"] == true); activity.runOnUiThread { result.success(null) } }
+                    catch (error: Exception) { activity.runOnUiThread { result.error("ADB", error.message, null) } }
+                }
+            }
+            "restoreZeppPermissions", "testZeppPermissions" -> {
+                if (!running.compareAndSet(false, true)) result.error("BUSY", "Un’operazione è già in corso.", null)
+                else worker.execute {
+                    try {
+                        if (method == "testZeppPermissions") coordination.testCycle() else coordination.restore()
+                        activity.runOnUiThread { result.success(null) }
+                    } catch (error: Exception) {
+                        activity.runOnUiThread { result.error("RESTORE", error.message, null) }
+                    } finally { running.set(false) }
+                }
+            }
+            "openZepp" -> {
+                if (running.get()) {
+                    result.error("BUSY", "Attendi la fine dell’operazione diretta prima di aprire Zepp.", null)
+                } else {
+                    val launch = activity.packageManager.getLaunchIntentForPackage("com.huami.watch.hmwatchmanager")
+                    if (launch == null) result.error("ZEPP_MISSING", "Zepp non è installata o non è disponibile su questo telefono.", null)
+                    else {
+                        try { activity.startActivity(launch); result.success(null) }
+                        catch (_: Exception) { result.error("ZEPP_LAUNCH", "Impossibile aprire Zepp. Aprila dall’elenco delle app.", null) }
+                    }
+                }
+            }
             "secure" -> {
                 val enabled = args["enabled"] == true
                 activity.runOnUiThread {
@@ -48,13 +112,39 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
                 }
                 result.success(null)
             }
-            "cancel" -> { closeSocket(); result.success(null) }
+            "cancel" -> { cancelled.set(true); bleProbe?.cancel(); closeSocket(); result.success(null) }
             "licenses" -> result.success(
-                listOf("AGPL-3.0.txt", "tiny-ECDH-LICENSE.txt", "THIRD_PARTY_NOTICES.md").joinToString("\n\n") { name ->
+                listOf("AGPL-3.0.txt", "tiny-ECDH-LICENSE.txt", "THIRD_PARTY_NOTICES.md", "flutter_adb-LICENSE.txt").joinToString("\n\n") { name ->
                     activity.assets.open("licenses/zepp/$name").bufferedReader().use { it.readText() }
                 }
             )
             else -> result.notImplemented()
+        }
+    }
+
+    @Suppress("MissingPermission")
+    private fun probeBle(args: Map<String, Any?>, result: MethodChannel.Result) {
+        if (!hasPermission()) { result.error("PERMISSION", "Permesso Bluetooth non disponibile.", null); return }
+        if (!running.compareAndSet(false, true)) { result.error("BUSY", "Un’operazione è già in corso.", null); return }
+        try {
+            val device = adapter()?.bondedDevices?.firstOrNull { it.address == args["address"] }
+            if (device == null) {
+                running.set(false)
+                result.error("DEVICE", "Scegli un orologio già abbinato.", null)
+                return
+            }
+            bleProbe = ZeppBleProbe(activity) { characteristics, error ->
+                running.set(false)
+                bleProbe = null
+                android.util.Log.i("SyncBeatZepp", "BLE discovery completed; count=${characteristics?.size ?: 0}; success=${error == null}")
+                if (error != null) result.error("BLE_PROBE", error, null)
+                else result.success(characteristics)
+            }
+            bleProbe!!.start(device)
+        } catch (_: Exception) {
+            running.set(false)
+            bleProbe = null
+            result.error("BLE_PROBE", "Verifica BLE non disponibile.", null)
         }
     }
 
@@ -121,12 +211,16 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
         val title = args["title"] as? String ?: ""
         val artist = args["artist"] as? String ?: ""
         val timeout = if (send) 720L else 120L
+        val coordinateZepp = args["coordinateZepp"] == true
         var deadline: ScheduledFuture<*>? = null
         timedOutFlag = false
+        cancelled.set(false)
         worker.execute {
             val chars = keyText?.toCharArray() ?: CharArray(0)
             var key: ByteArray? = null
             var session: ZeppSession? = null
+            var completed = false
+            var failure: String? = null
             try {
                 val device = adapter()?.bondedDevices?.firstOrNull { it.address == address }
                     ?: throw IOException("Dispositivo non tra quelli abbinati. Scegli di nuovo l'orologio.")
@@ -138,9 +232,15 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
                     if (title.isEmpty()) throw IOException("Titolo obbligatorio")
                     data = readMp3(requireNotNull(path) { "File mancante" })
                 }
+                deadline = timer.schedule({ timedOutFlag = true; closeSocket() }, timeout, TimeUnit.SECONDS)
+                if (coordinateZepp) {
+                    status("Sospensione temporanea di Dispositivi nelle vicinanze per Zepp…")
+                    coordination.begin((timeout + 60) * 1000)
+                    Thread.sleep(500) // Allow Android to close Zepp's existing sockets.
+                }
+                if (cancelled.get() || timedOutFlag) throw IOException("Operazione annullata prima del collegamento.")
                 status("Apertura connessione Classic...")
                 stopDiscovery()
-                deadline = timer.schedule({ timedOutFlag = true; closeSocket() }, timeout, TimeUnit.SECONDS)
                 val candidate = connectClassic(device)
                 session = ZeppSession(candidate.inputStream, candidate.outputStream, object : ZeppSession.Events {
                     override fun status(text: String) = this@ZeppBridge.status(text)
@@ -148,10 +248,11 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
                         activity.runOnUiThread { events?.success(mapOf("type" to "progress", "done" to acknowledgedBytes, "total" to total)) }
                     }
                 })
+                if (cancelled.get()) throw IOException("Operazione annullata.")
                 session.initialize(key)
+                if (cancelled.get()) throw IOException("Operazione annullata.")
                 if (send) session.upload(data!!, title, artist)
-                val sent = send
-                activity.runOnUiThread { result.success(mapOf("sent" to sent)) }
+                completed = true
             } catch (error: Exception) {
                 val message = when {
                     timedOutFlag -> "Tempo massimo superato. Nessun tentativo automatico: controlla l'orologio prima di riprovare."
@@ -159,14 +260,29 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
                     else -> "Operazione non riuscita. Controlla permessi, Bluetooth e stato dell'orologio."
                 }
                 android.util.Log.w("SyncBeatZepp", "Operazione interrotta: ${error.javaClass.simpleName}")
-                activity.runOnUiThread { result.error("ZEPP", message, null) }
+                failure = message
             } finally {
                 chars.fill('\u0000')
                 key?.fill(0)
                 deadline?.cancel(false)
                 try { session?.close() } catch (_: Exception) {}
                 closeSocket()
+                if (coordinateZepp) {
+                    status("Ripristino di Dispositivi nelle vicinanze per Zepp…")
+                    try {
+                        coordination.restore()
+                        android.util.Log.i("SyncBeatZepp", "Zepp Nearby devices permissions restored")
+                        if (failure != null) failure += "\nDispositivi nelle vicinanze di Zepp ripristinato allo stato iniziale."
+                    } catch (error: Exception) {
+                        failure = listOfNotNull(failure, error.message ?: "Ripristino Zepp non confermato.").joinToString("\n")
+                    }
+                }
                 running.set(false)
+            }
+            val error = failure
+            activity.runOnUiThread {
+                if (completed && error == null) result.success(mapOf("sent" to send, "zeppRestored" to coordinateZepp))
+                else result.error("ZEPP", error ?: "Operazione interrotta.", null)
             }
         }
     }

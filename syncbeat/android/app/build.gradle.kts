@@ -5,6 +5,7 @@ plugins {
 }
 
 android {
+    buildFeatures { aidl = true }
     namespace = "com.example.syncbeat"
     compileSdk = 37
     ndkVersion = flutter.ndkVersion
@@ -34,6 +35,10 @@ android {
 
     buildTypes {
         release {
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")

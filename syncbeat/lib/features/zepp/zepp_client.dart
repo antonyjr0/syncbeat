@@ -1,4 +1,6 @@
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'embedded_adb.dart';
 
 /// Un orologio Bluetooth gia' abbinato al telefono.
 class ZeppDevice {
@@ -8,7 +10,9 @@ class ZeppDevice {
 
   /// Mostra solo la coda dell'indirizzo, abbastanza per distinguere due dispositivi.
   String get label {
-    final tail = address.length > 5 ? address.substring(address.length - 5) : address;
+    final tail = address.length > 5
+        ? address.substring(address.length - 5)
+        : address;
     return '$name · ...$tail';
   }
 }
@@ -31,15 +35,32 @@ class ZeppException implements Exception {
 }
 
 const zeppMaxBytes = 32 * 1024 * 1024;
+const zeppMusicMetadataMaxBytes = 31;
+
+/// Match the installed Zepp music flow without splitting UTF-8 characters.
+String prepareZeppMusicMetadata(String value) {
+  final result = StringBuffer();
+  var bytes = 0;
+  for (final rune in value.trim().runes) {
+    final text = String.fromCharCode(rune);
+    final size = _utf8Length(text);
+    if (bytes + size > zeppMusicMetadataMaxBytes) break;
+    result.write(text);
+    bytes += size;
+  }
+  return result.toString();
+}
 
 /// Stessa regola del codice nativo: niente separatori del protocollo.
 String? validateZeppMetadata(String value, {bool required = false}) {
   if (required && value.trim().isEmpty) return 'Obbligatorio';
-  if (value.codeUnits.length > 200 || _utf8Length(value) > 200) {
-    return 'Massimo 200 byte';
+  if (_utf8Length(value) > zeppMusicMetadataMaxBytes) {
+    return 'Massimo 31 byte';
   }
   for (final unit in value.runes) {
-    if (unit < 32 || unit == 127 || '&?#%='.contains(String.fromCharCode(unit))) {
+    if (unit < 32 ||
+        unit == 127 ||
+        '&?#%='.contains(String.fromCharCode(unit))) {
       return 'Evita caratteri di controllo e & ? # % =';
     }
   }
@@ -48,7 +69,15 @@ String? validateZeppMetadata(String value, {bool required = false}) {
 
 int _utf8Length(String value) => value.runes.fold(
   0,
-  (sum, r) => sum + (r < 0x80 ? 1 : r < 0x800 ? 2 : r < 0x10000 ? 3 : 4),
+  (sum, r) =>
+      sum +
+      (r < 0x80
+          ? 1
+          : r < 0x800
+          ? 2
+          : r < 0x10000
+          ? 3
+          : 4),
 );
 
 /// La chiave Zepp: 32 cifre esadecimali, con o senza prefisso 0x.
@@ -60,6 +89,69 @@ class ZeppClient {
   const ZeppClient();
   static const _channel = MethodChannel('syncbeat/zepp');
   static const _events = EventChannel('syncbeat/zepp/events');
+  static const _storage = FlutterSecureStorage();
+  String _storageKey(ZeppDevice device) =>
+      'zepp_pairing_v1_${device.address.toUpperCase()}';
+
+  Future<String?> savedKey(ZeppDevice device) =>
+      _storage.read(key: _storageKey(device));
+  Future<void> rememberKey(ZeppDevice device, String key) =>
+      _storage.write(key: _storageKey(device), value: key.trim());
+  Future<void> forgetKey(ZeppDevice device) =>
+      _storage.delete(key: _storageKey(device));
+
+  Future<List<String>> probeParallelBle(ZeppDevice device) async {
+    try {
+      return await _channel.invokeListMethod<String>('probeBle', {
+            'address': device.address,
+          }) ??
+          const [];
+    } on PlatformException catch (error) {
+      throw ZeppException(error.message ?? 'Verifica BLE non disponibile.');
+    }
+  }
+
+  Future<void> openOfficialApp() async {
+    try {
+      await _channel.invokeMethod<void>('openZepp');
+    } on PlatformException catch (error) {
+      throw ZeppException(error.message ?? 'Impossibile aprire Zepp.');
+    }
+  }
+
+  Future<Map<String, dynamic>> coordinationStatus() async {
+    try {
+      return await _channel.invokeMapMethod<String, dynamic>('adbStatus') ??
+          {'state': 'not_running'};
+    } on PlatformException catch (error) {
+      throw ZeppException(
+        error.message ?? 'Stato debug wireless non disponibile.',
+      );
+    }
+  }
+
+  Future<bool> authorizeCoordination() async {
+    if (!await EmbeddedAdb.instance.reconnect()) return false;
+    return await _channel.invokeMethod<bool>('authorizeAdb') ?? false;
+  }
+
+  Future<void> setCoordinationEnabled(bool enabled) =>
+      _channel.invokeMethod<void>('setZeppCoordination', {'enabled': enabled});
+
+  Future<void> restoreZeppPermissions() =>
+      _coordinationAction('restoreZeppPermissions');
+  Future<void> testZeppPermissions() =>
+      _coordinationAction('testZeppPermissions');
+
+  Future<void> _coordinationAction(String method) async {
+    try {
+      await _channel.invokeMethod<void>(method);
+    } on PlatformException catch (error) {
+      throw ZeppException(
+        error.message ?? 'Gestione permessi Zepp non riuscita.',
+      );
+    }
+  }
 
   Stream<ZeppEvent> get events => _events.receiveBroadcastStream().map((raw) {
     final map = Map<String, dynamic>.from(raw as Map);
@@ -81,8 +173,16 @@ class ZeppClient {
   }
 
   /// Collega, autentica e legge le capacita'. Non invia musica.
-  Future<void> verify({required ZeppDevice device, required String key}) =>
-      _run({'address': device.address, 'key': key.trim(), 'send': false});
+  Future<void> verify({
+    required ZeppDevice device,
+    required String key,
+    bool coordinateZepp = false,
+  }) => _run({
+    'address': device.address,
+    'key': key.trim(),
+    'send': false,
+    if (coordinateZepp) 'coordinateZepp': true,
+  });
 
   /// Come [verify], poi invia un solo MP3 al lettore Musica dell'orologio.
   Future<void> send({
@@ -91,6 +191,7 @@ class ZeppClient {
     required String path,
     required String title,
     required String artist,
+    bool coordinateZepp = false,
   }) => _run({
     'address': device.address,
     'key': key.trim(),
@@ -98,6 +199,7 @@ class ZeppClient {
     'path': path,
     'title': title,
     'artist': artist,
+    if (coordinateZepp) 'coordinateZepp': true,
   });
 
   Future<void> _run(Map<String, Object?> arguments) async {

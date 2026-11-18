@@ -17,6 +17,7 @@ class MainActivity : FlutterActivity() {
     private var playbackError: String? = null
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        zepp.configureAdb(flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "syncbeat/public_audio").setMethodCallHandler { call, result ->
             try {
                 @Suppress("UNCHECKED_CAST")

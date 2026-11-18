@@ -45,6 +45,13 @@ corrispondente comprende i file nel branch `experiment/zepp-native-music`
 di `https://github.com/antonyjr0/syncbeat`, il wrapper Gradle e questa guida.
 Non sono richiesti segreti o file privati per compilare il prototipo.
 
+## flutter_adb
+
+Il client ADB integrato usa il pacchetto pubblicato `flutter_adb` 1.0.0,
+https://github.com/Jellepepe/flutter_adb . Il protocollo non e' stato riscritto
+o copiato in SyncBeat. Licenza completa in `flutter_adb-LICENSE.txt`.
+La precedente integrazione Shizuku e le sue dipendenze sono state rimosse.
+
 ## Cosa non e' incluso
 
 Non e' incluso il resto dell'app Gadgetbridge, il suo database, le sue

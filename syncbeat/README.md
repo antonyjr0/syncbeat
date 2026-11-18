@@ -245,6 +245,26 @@ confirmation before deleting temporary copies.
 
 ## Validation
 
+Android direct watch transfers offer optional **Gestisci automaticamente Zepp**.
+This uses the published `flutter_adb: 1.0.0` package inside SyncBeat, without
+Shizuku. Enable Wireless debugging (Android 11+) and use **Configura debug
+wireless**: pair with the temporary pairing port/code, then connect with the
+different port from the main Wireless debugging page. The host is fixed to
+127.0.0.1 and the ADB identity is stored in secure storage. A changed port requires
+reconnection. Pairing and a real transfer must be verified on the target phone.
+It temporarily revokes Zepp's Nearby devices permissions and restores their
+original state after success, error or cancellation. A separate helper has a
+watchdog and a durable recovery record; use **Ripristina permessi Zepp** if a
+restore cannot be confirmed. Start with **Prova sospensione e ripristino (senza
+file)**. See [setup and recovery limitations](docs/zepp-musica.it.md).
+
+On Android, a failed download whose diagnostic explicitly reports an outdated
+yt-dlp version offers **Aggiorna e riprova**. Declining leaves the error visible.
+Accepting updates the stable engine and retries the selected, authorized download
+once; failed updates and repeated failures stop without a retry loop. A generic
+403 alone does not trigger an update. The manual engine update remains available
+in the dialog footer.
+
 ```powershell
 dart format .
 flutter analyze

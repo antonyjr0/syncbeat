@@ -1,8 +1,29 @@
 # Musica sull'orologio Zepp, dentro SyncBeat
 
-**Stato: sperimentale. Non provata su un orologio reale.** Il codice compila,
-i test software passano, ma l'autenticazione, il servizio `music` e l'importazione
-sul firmware dell'Amazfit Active 3 Premium non sono mai stati verificati.
+**Stato: sperimentale, trasferimento non ancora riuscito su hardware reale.**
+Il 17 novembre 2026 la prova su Active 3 Premium ha superato collegamento,
+autenticazione e controllo del servizio `music` dopo aver tolto temporaneamente
+a Zepp il permesso Dispositivi nelle vicinanze. L'importazione si ferma alla
+risposta iniziale, prima dei blocchi audio. Il vecchio messaggio accorpava rifiuto,
+sessione inattesa e risposta incompleta: la diagnostica ora distingue i tre casi
+e mostra il codice numerico di un eventuale rifiuto. La prova della versione
+diagnostica sul dispositivo ha restituito stato `5`, con sessione corretta e
+nessun blocco audio inviato. Il codice sorgente upstream consultato tratta ogni
+stato diverso da zero come rifiuto, senza documentare il significato di `5`:
+non attribuirlo a memoria piena, formato o autorizzazioni senza altre prove.
+La guida ufficiale Amazfit include Active 3 Premium e descrive l'importazione
+da Zepp con connessione Wi-Fi: https://www.amazfit.jp/blogs/upyourgame/music1 .
+La prova con Zepp 10.10.5-play ha importato lo stesso MP3; l'utente ha confermato
+la riproduzione nel lettore dell'orologio. Durante la prova Android riportava
+Wi-Fi disattivato, nessuna route WLAN, e un socket Classic di Zepp connesso al
+canale 25. Non assumere quindi che questo firmware richieda il Wi-Fi: il problema
+rimane nel percorso SyncBeat. L'analisi locale dell'APK installato mostra che
+Zepp limita titolo e artista a 31 byte nel percorso musicale e sostituisce
+l'artista assente con uno spazio. SyncBeat invece propone il basename completo
+del download e permetteva 200 byte. Il codice ora propone un titolo entro 31 byte
+senza spezzare caratteri UTF-8, applica il limite anche nel nativo e usa uno spazio
+per l'artista assente. I test software passano; il nuovo comportamento non e'
+ancora verificato sull'orologio e non risolve da solo la contesa con Zepp.
 
 Questa e' una funzione della **stessa app Flutter SyncBeat**. Non c'e' nessuna
 seconda app da installare. Una piccola parte e' scritta in Kotlin/Java dentro
@@ -65,7 +86,8 @@ il resto del progetto. Non serve altro.
 1. Apri Zepp e completa la sincronizzazione. Non rimuovere l'orologio, non
    fare reset, non cambiare regione. Due app possono contendersi il
    collegamento: se non sai come lasciarlo libero, fermati.
-2. In SyncBeat vai su **MP3 locali** e tocca l'icona orologio sul brano scelto.
+2. In SyncBeat vai su **MP3 locali**, tocca l'icona orologio sul brano scelto e
+   seleziona **Invio diretto da SyncBeat (sperimentale)**.
    Per cominciare usa un file breve.
 3. **1. Mostra dispositivi abbinati**. Concedi **Dispositivi nelle vicinanze**
    se Android lo chiede. L'app non cerca dispositivi e non usa la posizione.
@@ -73,7 +95,10 @@ il resto del progetto. Non serve altro.
    Se non c'e', fermati: l'app non crea abbinamenti.
 5. Inserisci la **chiave** (32 cifre esadecimali) nel campo mascherato. Non
    scriverla in chat, issue o screenshot. Il campo si svuota quando parte
-   l'operazione e l'app non la salva su disco. Se non hai la chiave, puoi
+   l'operazione. Al primo uso viene conservata nell'archivio sicuro Android,
+   associata al singolo orologio, e riutilizzata senza mostrarla nel campo.
+   **Dimentica chiave salvata** la cancella; per sostituirla inseriscine una nuova.
+   Se non hai la chiave, puoi
    leggere la finestra ma **fermati qui**: il recupero sicuro della chiave e' una
    fase separata, non automatica.
 6. **3. Verifica collegamento (non invia)**: si connette, autentica e legge le
@@ -89,6 +114,16 @@ Ogni invio e' una nuova connessione: un solo brano alla volta, nessuna coda,
 nessun nuovo tentativo automatico dopo un errore.
 
 ## Se qualcosa non va
+
+Una prova reale del 17 novembre 2026 ha raggiunto `connect()` ma ha ricevuto
+`read failed, socket might closed or timeout, read ret: -1` dopo 483 ms.
+Il fallimento precede l'autenticazione e il trasferimento: non dimostra una
+chiave errata o un problema dell'MP3. Android elenca il dispositivo come DUAL
+e ha in cache il servizio `00000022`; questo non garantisce che il servizio sia
+disponibile in quel momento. Zepp era in esecuzione. La prova successiva consiste
+nel completare la sincronizzazione, arrestare temporaneamente Zepp e ripetere
+una sola verifica senza inviare file, quindi riaprire Zepp. Esito ancora da
+verificare; nessun reset o nuovo abbinamento richiesto.
 
 | Messaggio | Cosa fare |
 | --- | --- |
@@ -106,8 +141,116 @@ o di Zepp. Se interrompi l'invio puo' restare un file parziale.
 
 ## Limiti
 
+### Ricerca della connessione parallela
+
+Il requisito e' completare l'invio in SyncBeat mantenendo Zepp operativa, senza
+revocare permessi o fermarla. Non considerare il passaggio manuale a Zepp una
+soluzione equivalente. Il coordinator Active 3 Premium di Gadgetbridge dichiara
+`ConnectionType.BOTH`: e' un'indicazione dei trasporti implementati, non prova
+di sessioni simultanee. Per verificarne le capacita', la finestra offre
+**Verifica connessione parallela (senza invio)**. Apre BLE sul dispositivo gia'
+abbinato per massimo 20 secondi, legge i servizi e verifica le caratteristiche
+`16`, `17`, `23` della famiglia UUID Zepp. Non scrive caratteristiche o descrittori,
+non abilita notifiche, non autentica e non invia MP3. Chiude il proprio GATT su
+esito, errore, annullamento o timeout; non modifica i permessi di altre app.
+Una risposta positiva richiede ancora di verificare che Zepp resti connessa e
+non dimostra che l'autenticazione o l'invio musicale possano convivere.
+
+La prova reale ha registrato il client GATT con successo, ma non ha ricevuto
+`STATE_CONNECTED` nei 20 secondi: nessuna lettura dei servizi e' iniziata.
+Il timeout ha cancellato l'apertura e chiuso il client; non e' stato inviato
+alcun comando di autenticazione o blocco audio. Il risultato non dimostra
+l'assenza di BLE sul dispositivo, ma non offre una soluzione parallela verificata.
+
+### Percorso tramite Zepp (ripiego esplicito)
+
+L'utente ha accettato il passaggio a Zepp come ripiego, preferendo comunque
+l'invio diretto in SyncBeat. L'icona orologio della libreria apre ora una finestra
+con il nome del file, la cartella Download/SyncBeat, **Copia nome del file** e
+**Apri Zepp per trasferire**. Il comando nativo usa esclusivamente il launcher
+pubblico del package, con package visibility mirata. Non passa URI a componenti
+interni, non apre socket, non cambia permessi e non conferma il trasferimento.
+La selezione in Musica resta manuale. I file legacy privati non sono presentati
+come selezionabili da Zepp: vanno prima esportati. Il percorso diretto precedente
+e' ancora raggiungibile con un pulsante esplicitamente sperimentale.
+
+### Client ADB Flutter integrato (percorso corrente)
+
+La dipendenza pubblicata `flutter_adb: 1.0.0` gestisce ADB, TLS e pairing SPAKE2;
+SyncBeat non ne ricopia il protocollo. Le dipendenze e il provider Shizuku sono
+stati rimossi. Il collegamento e' limitato a `127.0.0.1`, non accetta host remoti
+e richiede Android 11+ con Debug wireless attivo. La schermata **Configura debug
+wireless (senza app aggiuntive)** separa porta/codice di abbinamento dalla porta
+principale di connessione. Usare lo schermo diviso per tenere aperto il codice.
+Il codice temporaneo non viene conservato; l'identita' RSA viene salvata tramite
+`flutter_secure_storage` e riusata. Il logging dettagliato del pacchetto e' spento.
+
+Il recupero nativo viene avviato tramite il collegamento ADB autorizzato come
+processo shell separato. Espone solo BEGIN, PING e RESTORE su un socket locale
+con nome casuale, verificando l'UID shell/root del peer. Non offre comandi shell
+arbitrari all'interfaccia dell'app. Ogni risposta riporta l'identificatore della
+richiesta, per non accettare risposte tardive per una richiesta diversa.
+Una connessione persa o 15 secondi senza richieste chiudono la sessione e
+tentano il ripristino; restano watchdog, registro atomico e ritentativi del
+servizio gia' testato. Flutter invia heartbeat durante l'operazione e segnala
+la perdita del servizio al nativo, che chiude il socket musicale.
+Prima di installare la build si verificano software e rollback del servizio;
+pairing TLS e invio reale con il pacchetto richiedono ancora la prova sul telefono.
+
+Prova reale del nuovo trasporto locale: tramite ADB autorizzato e forwarding
+temporaneo al socket del servizio, BEGIN ha sospeso il gruppo e la disconnessione
+improvvisa del client ha ripristinato automaticamente lo stato originale di tutti
+e tre i permessi. Nessun audio e' stato inviato. L'esito conferma il recupero del
+servizio locale, non ancora il pairing TLS del pacchetto Flutter.
+Una seconda istanza e' stata avviata durante la sospensione: non ha potuto
+iniziare un'altra operazione ne' ripristinare quella attiva, anche chiudendo il
+proprio client. Un file lock separa le transazioni fra processi; il registro
+di recupero resta condiviso per il recupero dopo la chiusura del processo.
+
+### Implementazione precedente con Shizuku (sostituita)
+
+**Gestisci automaticamente Zepp** usa Shizuku API/provider 13.1.5 (MIT).
+Richiede Shizuku installato, avviato e autorizzato per SyncBeat; niente root.
+Sul telefono Xiaomi e' necessario anche **Debug USB (Impostazioni di sicurezza)**.
+Shizuku deve essere riavviato dopo un riavvio Android. Il normale flusso resta
+disponibile senza questa modalita'; nessun permesso di Zepp viene cambiato
+finche' l'utente non la attiva e avvia una verifica, un invio o il test dedicato.
+
+Il servizio shell agisce soltanto su `com.huami.watch.hmwatchmanager`, profilo
+Android principale (utente 0), per `BLUETOOTH_CONNECT`, `BLUETOOTH_SCAN` e
+`BLUETOOTH_ADVERTISE`: sono i permessi dichiarati da Zepp nel gruppo
+**Dispositivi nelle vicinanze** sul telefono verificato. Conserva gli stati
+originali in un registro atomico privato alla shell prima di modificarli.
+Non concede permessi che erano inizialmente negati.
+
+La convalida locale di dispositivo, chiave, metadati e MP3 precede la sospensione.
+Il ripristino e' nel `finally` nativo, dopo la chiusura del socket e prima della
+risposta finale a Flutter, anche su errore file, rifiuto del firmware e annullamento.
+Se il ripristino fallisce, l'esito non viene riportato come completato: il registro
+resta disponibile e l'interfaccia offre **Ripristina permessi Zepp**.
+Il servizio indipendente rileva la morte del processo client e ha un watchdog
+(durata massima della verifica/invio piu' un minuto); i ripristini falliti vengono
+ritentati ogni 10 secondi finche' il servizio e' vivo. Timer di una vecchia
+operazione non possono ripristinare sopra un'operazione nuova.
+Se viene terminato anche il servizio privilegiato o si riavvia il telefono, il
+registro consente il recupero alla successiva attivazione di Shizuku e SyncBeat:
+non e' garantito un ripristino immediato senza un servizio autorizzato in esecuzione.
+Ripristinare il permesso non e' una prova che Zepp si sia gia' riconnessa.
+
+**Prova sospensione e ripristino (senza file)** verifica il ciclo prima di un invio.
+Il 17 novembre 2026 sono passati 31 test JVM (protocollo piu' transazione permessi)
+e 7 test Flutter della finestra. Una prova shell del servizio reale sul telefono,
+senza installare Shizuku o trasferire musica, ha confermato il ripristino di tutti
+e tre i permessi dopo un errore simulato e dopo il timeout del watchdog.
+Il percorso completo con autorizzazione Shizuku e invio reale resta da verificare.
+
+Fonti: https://github.com/RikkaApps/Shizuku-API e
+https://shizuku.rikka.app/guide/setup/ .
+
+### Invio Classic esistente
+
 - Solo Bluetooth Classic (RFCOMM) e file transfer V3 con servizio `music`.
-- Massimo 32 MiB per brano; titolo e artista fino a 200 byte, senza `& ? # % =`.
+- Massimo 32 MiB per brano; titolo e artista fino a 31 byte UTF-8, senza `& ? # % =`.
 - Android soltanto (su Windows l'icona non compare).
 - Nessun dato esce dal telefono per questa funzione. Nessun log di chiavi o dati.
 - La chiave passa in memoria dal campo di testo al codice nativo e viene azzerata

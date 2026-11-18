@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'dart:io';
 import 'android_youtube_bridge.dart';
 
 import '../../models/spotify_models.dart';
@@ -20,6 +20,7 @@ class YoutubeMatchDialog extends StatefulWidget {
     this.matcher = const YoutubeMatcher(),
     this.storage,
     this.downloader,
+    this.updateAndroidEngine,
     super.key,
   });
   final SpotifyTrack track;
@@ -29,6 +30,8 @@ class YoutubeMatchDialog extends StatefulWidget {
   final YoutubeMatcher matcher;
   final AudioStagingStorage? storage;
   final YoutubeDownloader? downloader;
+  final Future<void> Function(DownloadCancellationToken token)?
+  updateAndroidEngine;
   @override
   State<YoutubeMatchDialog> createState() => _YoutubeMatchDialogState();
 }
@@ -155,26 +158,34 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
     }
   }
 
-  Future<void> _updateAndroidEngine() async {
+  Future<bool> _updateAndroidEngine() async {
     final token = DownloadCancellationToken();
     setState(() {
       _operation = token;
+      _phase = 'Aggiornamento motore YouTube';
       _message = 'Aggiornamento del motore YouTube…';
     });
     try {
-      await AndroidYoutubeBridge().run(
-        ['--syncbeat-update-engine'],
-        cancellation: token,
-        onLine: (_) {},
-        timeout: const Duration(minutes: 3),
-      );
+      if (widget.updateAndroidEngine != null) {
+        await widget.updateAndroidEngine!(token);
+      } else {
+        await AndroidYoutubeBridge().run(
+          ['--syncbeat-update-engine'],
+          cancellation: token,
+          onLine: (_) {},
+          timeout: const Duration(minutes: 3),
+        );
+      }
+      token.throwIfCancelled();
       if (mounted) {
         setState(
           () => _message = 'Motore aggiornato. Puoi ripetere la ricerca.',
         );
       }
+      return true;
     } catch (error) {
       if (mounted) setState(() => _message = '$error');
+      return false;
     } finally {
       if (mounted) setState(() => _operation = null);
     }
@@ -255,7 +266,7 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
     }
   }
 
-  Future<void> _download() async {
+  Future<void> _download({bool allowEngineUpdate = true}) async {
     debugPrint('SYNCBEAT_DOWNLOAD requested');
     final video = _selected;
     if (_operation != null ||
@@ -274,6 +285,7 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
       _phase = 'Preparazione download';
     });
     _revealStatus();
+    var offerUpdate = false;
     try {
       final authorization = _authorization;
       debugPrint('SYNCBEAT_DOWNLOAD saving confirmations');
@@ -322,9 +334,44 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
       // Log only the error type; full details remain in the user's dialog.
       debugPrint('SYNCBEAT_DOWNLOAD failed type=${error.runtimeType}');
       if (mounted) setState(() => _message = '$error');
+      final message = error.toString().toLowerCase();
+      offerUpdate =
+          allowEngineUpdate &&
+          defaultTargetPlatform == TargetPlatform.android &&
+          !token.isCancelled &&
+          message.contains('yt-dlp') &&
+          (message.contains('older than') || message.contains('outdated'));
       _revealStatus();
     } finally {
       if (mounted) setState(() => _operation = null);
+    }
+    if (!mounted || !offerUpdate) return;
+    // The modal blocks underlying controls; retry only once for this download.
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Aggiornare il motore YouTube?'),
+        content: const Text(
+          'Il download non è riuscito e il motore segnala una versione obsoleta. '
+          'Vuoi aggiornarlo e riprovare una volta il brano selezionato? '
+          'L’aggiornamento potrebbe non risolvere il rifiuto del download.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Non ora'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Aggiorna e riprova'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    setState(() => _operation = null);
+    if (accepted == true && await _updateAndroidEngine() && mounted) {
+      await _download(allowEngineUpdate: false);
     }
   }
 
@@ -367,11 +414,6 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
               icon: const Icon(Icons.search),
               label: const Text('Cerca su YouTube'),
             ),
-            if (Platform.isAndroid)
-              TextButton(
-                onPressed: _operation == null ? _updateAndroidEngine : null,
-                child: const Text('Aggiorna motore YouTube'),
-              ),
             if (_saved != null)
               const Text(
                 'La scelta salvata non è il nuovo suggerimento. Esegui una nuova ricerca e salva esplicitamente se vuoi sostituirla.',
@@ -461,6 +503,12 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
       ),
     ),
     actions: [
+      if (defaultTargetPlatform == TargetPlatform.android)
+        OutlinedButton.icon(
+          onPressed: _operation == null ? _updateAndroidEngine : null,
+          icon: const Icon(Icons.system_update_alt),
+          label: const Text('Aggiorna motore YouTube'),
+        ),
       if (_selected != null)
         FilledButton.icon(
           onPressed:

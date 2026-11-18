@@ -69,6 +69,10 @@ public class ProtocolTest {
     ZeppSession.validateMetadata("Citta' di notte");
     fails(() -> ZeppSession.validateMetadata("titolo&singer=altro"), "evita");
     fails(() -> ZeppSession.validateMetadata("a\0b"), "evita");
+    ZeppSession.validateMetadata("a".repeat(31));
+    fails(() -> ZeppSession.validateMetadata("a".repeat(32)), "31 byte");
+    ZeppSession.validateMetadata("è".repeat(15));
+    fails(() -> ZeppSession.validateMetadata("è".repeat(16)), "31 byte");
   }
 
   @Test
@@ -203,6 +207,28 @@ public class ProtocolTest {
   }
 
   @Test
+  public void uploadResponseDistinguishesRejectionSessionAndMalformedData() throws Exception {
+    assertEquals(0, ZeppSession.parseUploadResponse(new byte[] {4, 0, 0, 0, 0, 0, 0}));
+    fails(() -> ZeppSession.parseUploadResponse(new byte[] {4, 0, 7}), "codice 7");
+    fails(() -> ZeppSession.parseUploadResponse(new byte[] {4, 1, 0}), "Sessione importazione");
+    fails(() -> ZeppSession.parseUploadResponse(new byte[] {5, 0, 0}), "comando 5");
+    fails(() -> ZeppSession.parseUploadResponse(new byte[] {4}), "intestazione");
+    fails(() -> ZeppSession.parseUploadResponse(new byte[] {4, 0, 0}), "avanzamento");
+  }
+
+  @Test
+  public void rejectedImportNeverSendsAudioBlocks() throws Exception {
+    Watch w = new Watch();
+    w.uploadStatus = 7;
+    ZeppSession c = w.client();
+    c.initialize(w.key);
+    fails(() -> c.upload(new byte[100], "Test", ""), "codice 7");
+    assertEquals(0, w.accepted);
+    assertFalse(w.finalAck);
+    c.close();
+  }
+
+  @Test
   public void uploadRequiresSuccessfulCapabilityCheck() throws Exception {
     Watch w = new Watch();
     fails(() -> w.client().upload(new byte[10], "Test", ""), "Verifica prima");
@@ -256,7 +282,7 @@ public class ProtocolTest {
     int negotiatedChunkSize = 16;
     boolean wrongSession, pingBeforeAuth, pongReceived;
     boolean music = true, rejectAuth, badAck, dropFinal, finalAck, capabilitiesRequested;
-    int sequence, version = 3, accepted, total, index, lastPercent, resume;
+    int sequence, version = 3, accepted, total, index, lastPercent, resume, uploadStatus;
     ByteArrayOutputStream file = new ByteArrayOutputStream();
 
     Watch() {
@@ -384,7 +410,7 @@ public class ProtocolTest {
           assertTrue(Wire.string(r, 1024).startsWith("music://file?songName="));
           Wire.string(r, 128);
           total = r.getInt();
-          service(13, Wire.buffer(7).put(new byte[] {4, 0, 0}).putInt(resume).array(), true);
+          service(13, Wire.buffer(7).put(new byte[] {4, 0, (byte) uploadStatus}).putInt(resume).array(), true);
         }
       } else if (channel == 3) {
         file.write(payload);
