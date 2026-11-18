@@ -101,6 +101,29 @@ Per ogni nuovo tentativo annotare ora, pulsante, stato della gestione automatica
 
 L'automazione non ha confermato il ciclo. Nessun invio era previsto in questa prova. Prima di un nuovo tentativo, chiarire lo stato di ripristino nel dialogo e verificare che Zepp funzioni.
 
+### Riconciliazione e diagnostica nella build successiva
+
+- Il refresh legge lo stato locale e può interrogare il registro solo tramite una connessione al servizio già aperta. La lettura non avvia il servizio e non richiede un ripristino. I log indicano gli esiti e la durata delle fasi ADB. Se falliscono sia la sospensione sia il ripristino, l'app mostra entrambi.
+- L'app salva l'identità del ciclo prima di inviare `BEGIN`. Il servizio salva la baseline come `OPEN` prima di sospendere i permessi e, dopo averla verificata, salva `CLOSED_VERIFIED` nello stesso registro atomico. L'app chiude il proprio obbligo solo dopo una risposta riferita al ciclo atteso. Il servizio conserva la ricevuta fino a quando può sostituirla con il successivo ciclo riconciliato.
+- Un vecchio marker privo di registro può essere chiuso con la conferma manuale esplicita. Questo esito resta distinto dal ripristino verificato. Un registro aperto o illeggibile richiede una verifica ulteriore.
+- Validazione locale: 9 test Flutter ADB/Zepp, compresa la conferma manuale, e 31 test JVM Zepp. Restano da provare il nuovo registro con una risposta persa o un'interruzione reale e il test automatico senza file sullo Xiaomi.
+
+Dopo l'installazione, Antonio ha segnalato un errore premendo **Ripristina permessi Zepp**. Alla lettura da PC il debug wireless risultava spento e i tre permessi Bluetooth di Zepp e i relativi flag coincidevano con lo stato iniziale. Nella directory del servizio non risultavano il registro base né il suo backup. Il messaggio esatto del tentativo non era disponibile nei log rimasti sul telefono. La lettura esterna non permette di confermare il ciclo nell'app.
+
+| Tentativo manuale | Esito dai log |
+| --- | --- |
+| Ripristino alle 14:11:49 | Connessione TLS ADB fallita in 5 ms. Ripristino interrotto prima di raggiungere il servizio dei permessi. |
+| Riconnessione alle 14:12:20 | Connessione TLS riuscita in 74 ms. |
+| Ripristino alle 14:12:27 | Prima apertura dello stream fallita dopo 10,002 s. Il canale shell si è aperto e chiuso durante il tentativo di lancio del servizio. Anche la seconda apertura dello stream è scaduta dopo 10,002 s. Ripristino fallito in **20,561 s**, senza risposta del servizio. |
+
+Dopo l'ultimo tentativo i tre permessi Zepp e i relativi flag coincidevano con lo stato iniziale. La chiusura del comando shell non conferma l'avvio del servizio. Il log non mostra l'apertura del socket del servizio, quindi il prossimo punto da isolare è il suo avvio sullo Xiaomi.
+
+Aggiornamento del dialogo: SyncBeat rilegge direttamente da Android i tre permessi Zepp all'apertura, dopo le azioni di gestione e al ritorno in primo piano. La lettura esplicita aggiorna il valore mostrato anche senza una sessione ADB attiva. Il numero di permessi concessi descrive lo stato attuale. La conferma in sospeso riguarda invece il ciclo precedente. I pulsanti di prova spiegano quale condizione manca quando l'operazione non può partire.
+
+Con l'APK aggiornato, alle 14:21:23 la connessione TLS ADB è riuscita in **37 ms**. Fino all'ultima lettura osservata non risultavano nuove chiamate di ripristino o di sospensione. Tutti e tre i permessi Zepp risultavano concessi con i flag iniziali.
+
+Su richiesta di Antonio, il codice è stato riportato a `914849f`, la versione precedente alle modifiche su riconciliazione, rilettura dei permessi e visibilità del dialogo. Le prove sopra restano documentate come storico.
+
 | Percorso | Cosa valutare |
 | --- | --- |
 | ADB integrato con abbinamento da notifica | Elimina lo schermo diviso. Verificare se l'identità salvata resta autorizzata e se la porta di connessione viene ritrovata quando cambia. La build con la notifica rileva la porta di abbinamento; l'inserimento della porta di connessione rimane esplicito. Se Android spegne il debug wireless, serve riattivarlo. |
