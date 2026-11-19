@@ -1,0 +1,10 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.antonyjr0.syncbeat.zepp'
+    compileSdk 35
+    defaultConfig { applicationId 'com.antonyjr0.syncbeat.zeppprototype'; minSdk 26; targetSdk 35; versionCode 1; versionName '0.1-experiment' }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_11; targetCompatibility JavaVersion.VERSION_11 }
+    buildTypes { release { minifyEnabled false } }
+    testOptions { unitTests.returnDefaultValues = true; unitTests.includeAndroidResources = true }
+}
+dependencies { testImplementation 'junit:junit:4.13.2'; testImplementation 'org.robolectric:robolectric:4.16.1' }

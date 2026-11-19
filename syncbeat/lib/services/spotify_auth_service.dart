@@ -98,6 +98,7 @@ class SpotifyAuthService {
     AppLinks? appLinks,
     Future<bool> Function(Uri uri)? openExternal,
     this.callbackTimeout = const Duration(minutes: 3),
+    this.tokenTimeout = const Duration(seconds: 20),
   }) : _tokenStore = secureTokenStore,
        _clientId = spotifyClientId,
        _httpClient = httpClient ?? http.Client(),
@@ -110,6 +111,7 @@ class SpotifyAuthService {
   final AppLinks _appLinks;
   final Future<bool> Function(Uri uri) _openExternal;
   final Duration callbackTimeout;
+  final Duration tokenTimeout;
   bool _signingIn = false;
 
   static Uri get redirectUri {
@@ -235,19 +237,35 @@ class SpotifyAuthService {
           // current PKCE transaction can complete this attempt.
           if (uri.scheme == redirect.scheme &&
               uri.host == redirect.host &&
-              uri.path == redirect.path &&
+              uri.port == redirect.port &&
+              uri.userInfo == redirect.userInfo &&
+              // Browsers can normalize a host-only custom URI by adding '/'.
+              // Accept that root path, but never an unrelated callback path.
+              (uri.path == redirect.path ||
+                  (redirect.path.isEmpty && uri.path == '/')) &&
               uri.queryParameters['state'] == state &&
               !callback.isCompleted) {
             callback.complete(uri);
           }
         }, onError: fail);
       }
-      if (!await _openExternal(authorizeUri).timeout(callbackTimeout)) {
+      if (!await _openExternal(authorizeUri).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => throw const SpotifyAuthException(
+          'Il browser non risponde. Apri il browser predefinito e riprova a collegare Spotify.',
+        ),
+      )) {
         throw const SpotifyAuthException(
           'Impossibile aprire il browser per autorizzare Spotify.',
         );
       }
-      final responseUri = await callback.future.timeout(callbackTimeout);
+      final responseUri = await callback.future.timeout(
+        callbackTimeout,
+        onTimeout: () => throw SpotifyAuthException(
+          'Spotify non è tornato a SyncBeat. Completa l’accesso e il consenso nel browser. '
+          'Se hai già autorizzato, verifica che il redirect registrato sia esattamente $redirect.',
+        ),
+      );
       final responseState = responseUri.queryParameters['state'];
       if (responseState != state) {
         throw const SpotifyAuthException(
@@ -270,10 +288,6 @@ class SpotifyAuthService {
       final tokens = await _exchangeCode(code, verifier, redirect);
       await _tokenStore.write(tokens);
       return tokens;
-    } on TimeoutException {
-      throw const SpotifyAuthException(
-        'Tempo scaduto in attesa del callback Spotify. Verifica il redirect URI registrato.',
-      );
     } finally {
       try {
         await server?.close(force: true);
@@ -302,7 +316,13 @@ class SpotifyAuthService {
             'code_verifier': verifier,
           },
         )
-        .timeout(const Duration(seconds: 20));
+        .timeout(
+          tokenTimeout,
+          onTimeout: () => throw const SpotifyAuthException(
+            'Spotify ha completato l’autorizzazione, ma il server dei token non risponde. '
+            'Controlla la connessione Internet e riprova a collegare Spotify.',
+          ),
+        );
     return _parseTokenResponse(response, const {});
   }
 
@@ -320,7 +340,13 @@ class SpotifyAuthService {
             'refresh_token': refreshToken,
           },
         )
-        .timeout(const Duration(seconds: 20));
+        .timeout(
+          tokenTimeout,
+          onTimeout: () => throw const SpotifyAuthException(
+            'Il server Spotify non risponde al rinnovo della sessione. '
+            'Controlla la connessione Internet e riprova.',
+          ),
+        );
     return _parseTokenResponse(
       response,
       scopes,

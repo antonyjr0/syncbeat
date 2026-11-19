@@ -154,6 +154,7 @@ class PublicAudioBridge(private val activity: Activity) {
     }
 
     fun playbackUri(path: String): Uri = owned(path)
+    fun openInput(path: String): java.io.InputStream = resolver.openInputStream(owned(path)) ?: error("File non disponibile")
     private fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it) }
     private fun background(result: MethodChannel.Result, action: () -> Any?) {
         worker.execute {

@@ -81,6 +81,37 @@ void main() {
     });
 
     test(
+      'token timeout is distinct from callback timeout and releases port',
+      () async {
+        final store = _TokenStore();
+        final auth = SpotifyAuthService(
+          secureTokenStore: store,
+          tokenTimeout: const Duration(milliseconds: 20),
+          httpClient: MockClient((_) => Completer<http.Response>().future),
+          openExternal: (uri) async {
+            await callback({
+              'state': uri.queryParameters['state']!,
+              'code': 'valid-code',
+            });
+            return true;
+          },
+        );
+        await expectLater(
+          auth.signIn(),
+          throwsA(
+            isA<SpotifyAuthException>().having(
+              (error) => error.message,
+              'message',
+              contains('server dei token'),
+            ),
+          ),
+        );
+        expect(store.tokens, isNull);
+        await expectPortAvailable();
+      },
+    );
+
+    test(
       'wrong state never exchanges tokens; unrelated path is ignored',
       () async {
         var exchanges = 0;
@@ -156,7 +187,7 @@ void main() {
     );
   }, skip: !Platform.isWindows);
   test(
-    'Android ignores stale login links and releases the subscription on each login',
+    'Android accepts both root paths, ignores unrelated links and releases subscriptions',
     () async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
@@ -194,12 +225,30 @@ void main() {
           sink.success(
             'amazfitmusicsync://callback?state=previous-login&code=stale',
           );
+          for (final invalid in [
+            'amazfitmusicsync://callback/unrelated',
+            'amazfitmusicsync://other/',
+            'amazfitmusicsync://callback:1234/',
+            'amazfitmusicsync://other@callback/',
+          ]) {
+            sink.success(
+              Uri.parse(invalid)
+                  .replace(
+                    queryParameters: {
+                      'state': uri.queryParameters['state']!,
+                      'code': 'must-not-exchange',
+                    },
+                  )
+                  .toString(),
+            );
+          }
           await Future<void>.delayed(Duration.zero);
           expect(exchanges, 0);
           sink.success(
             Uri(
               scheme: 'amazfitmusicsync',
               host: 'callback',
+              path: cancelled == 0 ? '' : '/',
               queryParameters: {
                 'state': uri.queryParameters['state']!,
                 'code': 'current-code',

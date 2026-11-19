@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:syncbeat/features/audio_sources/audio_source.dart';
@@ -57,6 +58,7 @@ class _Download extends YoutubeDownloader {
   _Download() : super(tools: const _Tools(), storage: _UnusedStorage());
   int calls = 0;
   bool fail = false;
+  String failureMessage = 'Errore di prova del download.';
   @override
   Future<StagedAudioFile> download({
     required SpotifyTrack track,
@@ -68,7 +70,7 @@ class _Download extends YoutubeDownloader {
   }) async {
     expect(authorization.valid, isTrue);
     calls++;
-    if (fail) throw const AudioSourceException('Errore di prova del download.');
+    if (fail) throw AudioSourceException(failureMessage);
     onPhase?.call('Conversione MP3');
     return StagedAudioFile(
       path: 'content://media/external/downloads/42',
@@ -92,10 +94,15 @@ void main() {
   testWidgets(
     'download footer is visible and requires saved choice plus both permissions; authorised click starts download',
     (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       SharedPreferences.setMockInitialValues({});
       await tester.binding.setSurfaceSize(const Size(393, 852));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final download = _Download();
+      var updates = 0;
+      var updateFails = false;
+      var updateFixesDownload = true;
       await tester.pumpWidget(
         MaterialApp(
           home: Builder(
@@ -107,6 +114,15 @@ void main() {
                     track: fixtures.track,
                     tools: const _Tools(),
                     downloader: download,
+                    updateAndroidEngine: (_) async {
+                      updates++;
+                      if (updateFails) {
+                        throw const AudioSourceException(
+                          'Aggiornamento non riuscito',
+                        );
+                      }
+                      if (updateFixesDownload) download.fail = false;
+                    },
                   ),
                 ),
                 child: const Text('Apri'),
@@ -162,6 +178,41 @@ void main() {
       expect(tester.getRect(error).top, greaterThan(0));
       expect(tester.getRect(error).bottom, lessThan(852));
       expect(tester.widget<FilledButton>(button).onPressed, isNotNull);
+      expect(find.text('Aggiornare il motore YouTube?'), findsNothing);
+      download.failureMessage =
+          'yt-dlp version is older than 90 days! HTTP Error 403';
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      expect(find.text('Aggiornare il motore YouTube?'), findsOneWidget);
+      await tester.tap(find.text('Non ora'));
+      await tester.pumpAndSettle();
+      expect(updates, 0);
+      final callsBeforeRetry = download.calls;
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Aggiorna e riprova'));
+      await tester.pumpAndSettle();
+      expect(updates, 1);
+      expect(download.calls, callsBeforeRetry + 2);
+      expect(find.text('Apri file'), findsOneWidget);
+      download.fail = true;
+      updateFixesDownload = false;
+      var before = download.calls;
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Aggiorna e riprova'));
+      await tester.pumpAndSettle();
+      expect(download.calls, before + 2);
+      expect(find.text('Aggiornare il motore YouTube?'), findsNothing);
+      updateFails = true;
+      before = download.calls;
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Aggiorna e riprova'));
+      await tester.pumpAndSettle();
+      expect(download.calls, before + 1);
+      expect(find.text('Aggiornamento non riuscito'), findsOneWidget);
+      debugDefaultTargetPlatformOverride = null;
     },
   );
   for (final scale in [1.0, 1.5]) {

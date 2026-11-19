@@ -101,6 +101,12 @@ class YoutubeOperationService : Service() {
             checkActive(job)
             val output = if (job.arguments.contains("--dump-json")) compactMetadata(response.out) else ""
             deliver = { job.result.success(mapOf("output" to output)) }
+        } catch (error: LinkageError) {
+            // Initialization failures (including ExceptionInInitializerError)
+            // are Errors, not Exceptions. Report them across the channel rather
+            // than letting an executor thread terminate the application.
+            android.util.Log.e("SyncBeatYoutube", "Native runtime initialization failed", error)
+            deliver = { job.result.error("ENGINE_INIT", "Impossibile inizializzare il motore audio. Aggiorna SyncBeat e riprova.", null) }
         } catch (error: Exception) {
             android.util.Log.e("SyncBeatYoutube", "Service operation failed: ${error.javaClass.simpleName}")
             val code = if (job.timedOut.get()) "TIMEOUT" else if (job.cancelled.get() || error is YoutubeDL.CanceledException) "CANCELLED" else "YOUTUBE"

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'app.dart';
+import 'features/zepp/embedded_adb.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  EmbeddedAdb.instance.register();
   runApp(const SyncBeatApp());
 }
 
