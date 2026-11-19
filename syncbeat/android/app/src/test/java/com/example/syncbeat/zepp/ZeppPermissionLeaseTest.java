@@ -6,6 +6,42 @@ import java.util.*;
 import org.junit.Test;
 
 public class ZeppPermissionLeaseTest {
+  @Test public void restoreQueuedDuringSlowBeginLeavesPermissionsGranted() throws Exception {
+    java.util.concurrent.CountDownLatch revokeEntered = new java.util.concurrent.CountDownLatch(1);
+    java.util.concurrent.CountDownLatch finishBegin = new java.util.concurrent.CountDownLatch(1);
+    Access access = new Access() {
+      @Override public void setGranted(String name, boolean value) throws IOException {
+        if (!value && name.equals(ZeppPermissionLease.PERMISSIONS[0])) {
+          revokeEntered.countDown();
+          try {
+            if (!finishBegin.await(5, java.util.concurrent.TimeUnit.SECONDS)) throw new IOException("Test did not release BEGIN");
+          } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new IOException(error);
+          }
+        }
+        super.setGranted(name, value);
+      }
+    };
+    ZeppPermissionLease lease = new ZeppPermissionLease(access, new Journal());
+    java.util.concurrent.ExecutorService server = java.util.concurrent.Executors.newSingleThreadExecutor();
+    try {
+      java.util.concurrent.Future<?> begin = server.submit(() -> { lease.begin(); return null; });
+      assertTrue(revokeEntered.await(5, java.util.concurrent.TimeUnit.SECONDS));
+      try { begin.get(1, java.util.concurrent.TimeUnit.MILLISECONDS); fail("BEGIN should still be blocked"); }
+      catch (java.util.concurrent.TimeoutException expected) { }
+      java.util.concurrent.Future<?> restore = server.submit(() -> { lease.restore(); return null; });
+      assertFalse(restore.isDone());
+      finishBegin.countDown();
+      begin.get(5, java.util.concurrent.TimeUnit.SECONDS);
+      restore.get(5, java.util.concurrent.TimeUnit.SECONDS);
+      assertFalse(access.values.containsValue(false));
+      assertFalse(lease.pending());
+    } finally {
+      finishBegin.countDown();
+      server.shutdownNow();
+    }
+  }
   static class Access implements ZeppPermissionLease.Permissions {
     Map<String, Boolean> values = new LinkedHashMap<>();
     String failRevoke, failGrant;

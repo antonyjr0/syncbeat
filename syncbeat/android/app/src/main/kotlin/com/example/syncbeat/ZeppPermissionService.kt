@@ -113,20 +113,23 @@ class ZeppPermissionService : IZeppPermissionService.Stub() {
 
     @Synchronized
     override fun beginLease(token: IBinder, timeoutMillis: Long) {
+        ZeppDiagnostics.record("LEASE_BEGIN_ENTER", "generation=$generation")
         check(owner == null) { "Un trasferimento coordinato è già in corso." }
         require(timeoutMillis in 10_000..900_000) { "Durata sospensione non valida." }
         check(token.isBinderAlive) { "SyncBeat non è più collegata." }
         check(acquireProcessLock()) { "Un altro servizio sta gestendo i permessi di Zepp." }
         val expectedGeneration = ++generation
-        val death = IBinder.DeathRecipient { timers.execute { restoreSafely(expectedGeneration) } }
+        val death = IBinder.DeathRecipient { timers.execute { ZeppDiagnostics.record("OWNER_DIED"); restoreSafely(expectedGeneration) } }
         token.linkToDeath(death, 0)
         owner = token
         ownerDeath = death
         try {
             lease.begin()
+            ZeppDiagnostics.record("LEASE_BEGIN_OK", "generation=$generation")
             if (!token.isBinderAlive) throw IOException("SyncBeat si è chiusa durante la preparazione.")
-            watchdog = timers.schedule({ restoreSafely(expectedGeneration) }, timeoutMillis, TimeUnit.MILLISECONDS)
+            watchdog = timers.schedule({ ZeppDiagnostics.record("WATCHDOG_EXPIRED"); restoreSafely(expectedGeneration) }, timeoutMillis, TimeUnit.MILLISECONDS)
         } catch (error: Exception) {
+            ZeppDiagnostics.record("LEASE_BEGIN_ERROR")
             restoreSafely(expectedGeneration)
             throw IllegalStateException("Sospensione Zepp non riuscita. Controlla il ripristino dei permessi.", error)
         }
@@ -134,6 +137,7 @@ class ZeppPermissionService : IZeppPermissionService.Stub() {
 
     @Synchronized
     override fun restore() {
+        ZeppDiagnostics.record("LEASE_RESTORE_ENTER", "generation=$generation")
         // An idle/old helper must never undo another process's active lease.
         if (!acquireProcessLock()) return
         watchdog?.cancel(false); watchdog = null
@@ -141,10 +145,12 @@ class ZeppPermissionService : IZeppPermissionService.Stub() {
         owner = null; ownerDeath = null
         try {
             lease.restore()
+            ZeppDiagnostics.record("LEASE_RESTORE_OK", "generation=$generation")
             releaseProcessLock()
             generation++
             retry?.cancel(false); retry = null
         } catch (error: Exception) {
+            ZeppDiagnostics.record("LEASE_RESTORE_ERROR")
             // Also retry failures of an explicit restore/finally call, after the
             // watchdog and client death registration have already been cleared.
             val expectedGeneration = generation
@@ -166,6 +172,9 @@ class ZeppPermissionService : IZeppPermissionService.Stub() {
     @Synchronized
     override fun pendingRestore(): Boolean = try { lease.pending() }
         catch (error: Exception) { throw IllegalStateException("Stato ripristino Zepp non leggibile.", error) }
+
+    @Synchronized
+    fun diagnosticStatus(): String = "STATUS:${if (owner != null) 1 else 0}:${if (lease.pending()) 1 else 0}:$generation"
 
     override fun destroy() {
         // A failed restore must retain the helper and undo record for recovery.

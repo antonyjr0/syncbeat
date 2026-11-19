@@ -34,6 +34,8 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
     private val worker = Executors.newSingleThreadExecutor()
     private val timer = Executors.newSingleThreadScheduledExecutor()
     private val running = AtomicBoolean(false)
+    @Volatile private var diagnosticPhase = "idle"
+    @Volatile private var diagnosticOutcome = "none"
     @Volatile private var socket: BluetoothSocket? = null
     @Volatile private var timedOutFlag = false
     private var pendingDevices: MethodChannel.Result? = null
@@ -49,7 +51,7 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
                 "cancelPairingNotification" -> { adbPairing.cancel(); result.success(null) }
                 "bootstrap" -> result.success(mapOf("apkPath" to activity.applicationInfo.sourceDir,
                     "user" to android.os.Process.myUid() / 100000))
-                "leaseLost" -> { cancelled.set(true); closeSocket(); result.success(null) }
+                "leaseLost" -> { ZeppDiagnostics.record("BRIDGE_LEASE_LOST"); cancelled.set(true); closeSocket(); result.success(null) }
                 "settings" -> {
                     try {
                         openWirelessDebuggingSettings(activity)
@@ -74,11 +76,11 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
             "probeBle" -> probeBle(args, result)
             "adbStatus" -> worker.execute {
                 try {
-                    if (!running.get()) coordination.restore()
-                    val state = coordination.status()
+                    // Observation must never restore permissions or bootstrap a helper.
+                    val state = coordination.status() + mapOf("phase" to diagnosticPhase, "outcome" to diagnosticOutcome)
                     activity.runOnUiThread { result.success(state) }
                 } catch (error: Exception) {
-                    activity.runOnUiThread { result.error("RESTORE", error.message, null) }
+                    activity.runOnUiThread { result.error((error as? ZeppCoordinationException)?.code ?: "RESTORE", error.message, null) }
                 }
             }
             "authorizeAdb" -> worker.execute {
@@ -91,18 +93,22 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
                     catch (error: Exception) { activity.runOnUiThread { result.error("ADB", error.message, null) } }
                 }
             }
-            "restoreZeppPermissions", "testZeppPermissions" -> {
+            "prepareZeppHelper", "restoreZeppPermissions", "testZeppPermissions" -> {
                 if (!running.compareAndSet(false, true)) result.error("BUSY", "Un’operazione è già in corso.", null)
                 else worker.execute {
                     val started = SystemClock.elapsedRealtime()
                     Log.i("SyncBeatZepp", "$method avviato")
                     try {
-                        if (method == "testZeppPermissions") coordination.testCycle() else coordination.restore()
+                        when (method) {
+                            "prepareZeppHelper" -> coordination.prepare()
+                            "testZeppPermissions" -> coordination.testCycle()
+                            else -> coordination.restore()
+                        }
                         Log.i("SyncBeatZepp", "$method riuscito in ${SystemClock.elapsedRealtime() - started} ms")
                         activity.runOnUiThread { result.success(null) }
                     } catch (error: Exception) {
                         Log.w("SyncBeatZepp", "$method fallito dopo ${SystemClock.elapsedRealtime() - started} ms: ${error.javaClass.simpleName}")
-                        activity.runOnUiThread { result.error("RESTORE", error.message, null) }
+                        activity.runOnUiThread { result.error((error as? ZeppCoordinationException)?.code ?: "RESTORE", error.message, null) }
                     } finally { running.set(false) }
                 }
             }
@@ -126,7 +132,7 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
                 }
                 result.success(null)
             }
-            "cancel" -> { cancelled.set(true); bleProbe?.cancel(); closeSocket(); result.success(null) }
+            "cancel" -> { ZeppDiagnostics.record("BRIDGE_CANCEL"); cancelled.set(true); bleProbe?.cancel(); closeSocket(); result.success(null) }
             "licenses" -> result.success(
                 listOf("AGPL-3.0.txt", "tiny-ECDH-LICENSE.txt", "THIRD_PARTY_NOTICES.md", "flutter_adb-LICENSE.txt").joinToString("\n\n") { name ->
                     activity.assets.open("licenses/zepp/$name").bufferedReader().use { it.readText() }
@@ -253,6 +259,9 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
             val operation = if (send) "Invio MP3" else "Verifica Classic"
             Log.i("SyncBeatZepp", "$operation avviata: gestione Zepp=$coordinateZepp")
             var phase = "preparazione"
+            diagnosticPhase = "preparation"
+            diagnosticOutcome = "running"
+            ZeppDiagnostics.record("RUN_START")
             val chars = keyText?.toCharArray() ?: CharArray(0)
             var key: ByteArray? = null
             var session: ZeppSession? = null
@@ -272,12 +281,16 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
                 deadline = timer.schedule({ timedOutFlag = true; closeSocket() }, timeout, TimeUnit.SECONDS)
                 if (coordinateZepp) {
                     phase = "sospensione Zepp"
+                    diagnosticPhase = "suspend"
+                    ZeppDiagnostics.record("RUN_SUSPEND")
                     status("Sospensione temporanea di Dispositivi nelle vicinanze per Zepp…")
                     coordination.begin((timeout + 60) * 1000)
                     Thread.sleep(500) // Allow Android to close Zepp's existing sockets.
                 }
                 if (cancelled.get() || timedOutFlag) throw IOException("Operazione annullata prima del collegamento.")
                 phase = "connessione Classic"
+                diagnosticPhase = "connect"
+                ZeppDiagnostics.record("RUN_CONNECT")
                 status("Apertura connessione Classic...")
                 stopDiscovery()
                 val candidate = connectClassic(device)
@@ -289,14 +302,19 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
                 })
                 if (cancelled.get()) throw IOException("Operazione annullata.")
                 phase = "inizializzazione sessione"
+                diagnosticPhase = "initialize"
+                ZeppDiagnostics.record("RUN_INITIALIZE")
                 session.initialize(key)
                 if (cancelled.get()) throw IOException("Operazione annullata.")
                 if (send) {
                     phase = "importazione MP3"
+                    diagnosticPhase = "upload"
+                    ZeppDiagnostics.record("RUN_UPLOAD")
                     session.upload(data!!, title, artist)
                 }
                 completed = true
             } catch (error: Exception) {
+                ZeppDiagnostics.record("RUN_PRIMARY_ERROR", "cancelled=${cancelled.get()} timedOut=$timedOutFlag")
                 val message = when {
                     timedOutFlag -> "Tempo massimo superato. Nessun tentativo automatico: controlla l'orologio prima di riprovare."
                     error is IOException -> error.message ?: "Errore Bluetooth"
@@ -313,18 +331,21 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
                 Log.w("SyncBeatZepp", "Operazione interrotta: $reason, fase=$phase$detail")
                 failure = message
             } finally {
+                ZeppDiagnostics.record("RUN_FINALLY", "completed=$completed primaryFailed=${failure != null}")
                 chars.fill('\u0000')
                 key?.fill(0)
                 deadline?.cancel(false)
                 try { session?.close() } catch (_: Exception) {}
                 closeSocket()
                 if (coordinateZepp) {
+                    diagnosticPhase = "restore"
                     status("Ripristino di Dispositivi nelle vicinanze per Zepp…")
                     try {
-                        coordination.restore()
+                        coordination.restore(allowBootstrap = false)
                         android.util.Log.i("SyncBeatZepp", "Zepp Nearby devices permissions restored")
                         if (failure != null) failure += "\nDispositivi nelle vicinanze di Zepp ripristinato allo stato iniziale."
                     } catch (error: Exception) {
+                        ZeppDiagnostics.record("RUN_RECOVERY_ERROR")
                         Log.w("SyncBeatZepp", "Ripristino Zepp non confermato: ${error.javaClass.simpleName}")
                         failure = listOfNotNull(failure, error.message ?: "Ripristino Zepp non confermato.").joinToString("\n")
                     }
@@ -333,6 +354,7 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
             }
             val error = failure
             val outcome = if (completed && error == null) "riuscita" else "fallita"
+            diagnosticOutcome = if (completed && error == null) "success" else "failed"
             Log.i("SyncBeatZepp", "$operation $outcome dopo ${SystemClock.elapsedRealtime() - started} ms")
             activity.runOnUiThread {
                 if (completed && error == null) result.success(mapOf("sent" to send, "zeppRestored" to coordinateZepp))

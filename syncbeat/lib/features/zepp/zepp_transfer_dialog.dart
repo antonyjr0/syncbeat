@@ -6,6 +6,7 @@ import 'embedded_adb_setup.dart';
 
 import '../audio_sources/public_audio_storage.dart';
 import 'zepp_client.dart';
+import 'zepp_diagnostics.dart';
 
 /// Finestra di dialogo, aperta dall'elenco "MP3 locali" gia' esistente, per
 /// inviare un MP3 gia' scaricato al lettore Musica dell'orologio.
@@ -37,7 +38,8 @@ class ZeppTransferDialog extends StatefulWidget {
   State<ZeppTransferDialog> createState() => _ZeppTransferDialogState();
 }
 
-class _ZeppTransferDialogState extends State<ZeppTransferDialog> {
+class _ZeppTransferDialogState extends State<ZeppTransferDialog>
+    with WidgetsBindingObserver {
   final _key = TextEditingController();
   late final _title = TextEditingController(
     text: prepareZeppMusicMetadata(
@@ -57,6 +59,7 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog> {
   bool _coordinateZepp = false;
   String _coordinationState = 'loading';
   bool _restorePending = false;
+  String _leaseState = 'unavailable';
 
   Future<void> _refreshCoordination() async {
     try {
@@ -66,11 +69,15 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog> {
         _coordinationState = state['state'] as String? ?? 'not_running';
         _coordinateZepp = state['enabled'] == true;
         _restorePending = state['pendingRestore'] == true;
+        final diagnostics = state['diagnostics'] as Map?;
+        _leaseState = diagnostics?['leaseState'] as String? ?? 'unavailable';
+        zeppDiagnostic('UI_STATUS_READ');
       });
     } catch (_) {
       if (mounted) {
         setState(() {
           _coordinationState = 'unavailable';
+          _leaseState = 'unknown';
           _restorePending = true;
         });
       }
@@ -97,6 +104,35 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog> {
           _status = error is ZeppException
               ? error.message
               : 'Impossibile attivare la gestione di Zepp.';
+        });
+      }
+    } finally {
+      await _refreshCoordination();
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _prepareZeppHelper() async {
+    setState(() {
+      _busy = true;
+      _failed = false;
+      _status = 'Preparazione del servizio ADB…';
+    });
+    try {
+      await widget.client.prepareZeppHelper();
+      if (mounted) {
+        setState(
+          () => _status =
+              'Servizio ADB pronto e collegato. Nessuna sospensione dei permessi richiesta.',
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _failed = true;
+          _status = error is ZeppException
+              ? error.message
+              : 'Preparazione del servizio ADB non riuscita.';
         });
       }
     } finally {
@@ -232,6 +268,8 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    zeppDiagnostic('UI_OPEN');
     unawaited(widget.client.secureScreen(true));
     unawaited(_refreshCoordination());
     _sub = (widget.events ?? widget.client.events).listen((event) {
@@ -247,7 +285,14 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    zeppDiagnostic('UI_LIFECYCLE_${state.name}');
+  }
+
+  @override
   void dispose() {
+    zeppDiagnostic('UI_DISPOSE');
+    WidgetsBinding.instance.removeObserver(this);
     if (_busy) unawaited(widget.client.cancel());
     unawaited(widget.client.secureScreen(false));
     _sub?.cancel();
@@ -346,6 +391,7 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog> {
       _progress = null;
       _status = 'Avvio...';
     });
+    zeppDiagnostic(send ? 'UI_SEND' : 'UI_VERIFY');
     try {
       final key = enteredKey.isNotEmpty
           ? enteredKey
@@ -484,6 +530,22 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog> {
           child: const Text('Configura debug wireless (senza app aggiuntive)'),
         ),
         if (_coordinateZepp || _restorePending) ...[
+          Text(switch (_leaseState) {
+            'active' => 'Diagnostica sospensione: attiva',
+            'idle' => 'Diagnostica sospensione: inattiva',
+            'unknown' => 'Diagnostica sospensione: stato non verificabile',
+            _ => 'Diagnostica sospensione: servizio non collegato',
+          }),
+          OutlinedButton(
+            onPressed: _busy || _coordinationState != 'ready'
+                ? null
+                : _prepareZeppHelper,
+            child: const Text('Prepara servizio ADB (senza sospensione)'),
+          ),
+          TextButton(
+            onPressed: _busy ? null : _refreshCoordination,
+            child: const Text('Aggiorna stato diagnostico'),
+          ),
           if (_restorePending)
             const Text(
               'Ripristino Zepp da verificare: premi Ripristina permessi Zepp.',

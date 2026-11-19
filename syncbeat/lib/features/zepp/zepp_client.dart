@@ -138,6 +138,8 @@ class ZeppClient {
   Future<void> setCoordinationEnabled(bool enabled) =>
       _channel.invokeMethod<void>('setZeppCoordination', {'enabled': enabled});
 
+  Future<void> prepareZeppHelper() => _coordinationAction('prepareZeppHelper');
+
   Future<void> restoreZeppPermissions() =>
       _coordinationAction('restoreZeppPermissions');
   Future<void> testZeppPermissions() =>

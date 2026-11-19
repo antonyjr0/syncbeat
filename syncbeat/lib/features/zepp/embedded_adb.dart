@@ -3,10 +3,14 @@ import 'dart:convert';
 import 'dart:isolate';
 import 'dart:math';
 
-import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_adb/flutter_adb.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+import 'zepp_adb_requests.dart';
+import 'zepp_adb_stream.dart';
+import 'zepp_diagnostics.dart';
 
 Map<String, String> _generateAdbIdentity() =>
     AdbCrypto(adbKeyName: 'SyncBeat@self').exportKeyPairForStorage();
@@ -14,18 +18,25 @@ Map<String, String> _generateAdbIdentity() =>
 /// Self-device only. Credentials never leave secure storage or appear in logs.
 class EmbeddedAdb {
   EmbeddedAdb._();
+
+  @visibleForTesting
+  EmbeddedAdb.forTesting(AdbConnection connection) : _connection = connection;
   static final instance = EmbeddedAdb._();
   static const channel = MethodChannel('syncbeat/embedded_adb');
   static const _storage = FlutterSecureStorage();
   AdbCrypto? _identity;
   Future<AdbCrypto>? _identityLoading;
   AdbConnection? _connection;
-  AdbStream? _helper;
+  ZeppAdbStream? _helper;
+  Future<void>? _preparation;
+  int _nextStreamId = 0;
+  int _connectionGeneration = 0;
+  int _bootstrapAttempt = 0;
   StreamSubscription<String>? _subscription;
-  Completer<String>? _reply;
-  int _sequence = 0;
-  String? _replyId;
-  Future<void> _queue = Future.value();
+  late final _requests = ZeppAdbRequests((line) async {
+    final stream = _helper;
+    return stream != null && await stream.writeString(line);
+  });
   Timer? _heartbeat;
   bool _active = false;
   int? _port;
@@ -36,37 +47,66 @@ class EmbeddedAdb {
 
   void register() {
     channel.setMethodCallHandler((call) async {
-      switch (call.method) {
-        case 'ready':
-          return ready;
-        case 'begin':
-          await _ensureHelper();
-          await _request('BEGIN ${call.arguments as int}');
-          _active = true;
-          _heartbeat?.cancel();
-          _heartbeat = Timer.periodic(const Duration(seconds: 5), (_) async {
-            if (!_active) return;
-            try {
-              await _request('PING');
-            } catch (_) {
-              _active = false;
-              _heartbeat?.cancel();
-              try {
-                await channel.invokeMethod<void>('leaseLost');
-              } catch (_) {
-                /* Native worker may already be gone. */
-              }
+      try {
+        switch (call.method) {
+          case 'ready':
+            return ready;
+          case 'diagnostics':
+            // Never reconnect or bootstrap during observation.
+            if (!ready || _helper == null || _helper!.isClosed) {
+              return <String, Object>{'leaseState': 'unavailable'};
             }
-          });
-          return null;
-        case 'restore':
-          _active = false;
-          _heartbeat?.cancel();
-          await _ensureHelper();
-          await _request('RESTORE');
-          return null;
-        default:
-          throw MissingPluginException();
+            try {
+              final reply = await _request('STATUS');
+              final fields = reply.split(':');
+              if (fields.length != 4 || fields[0] != 'STATUS') {
+                throw StateError('Stato diagnostico non valido.');
+              }
+              return <String, Object>{
+                'leaseState': fields[1] == '1' ? 'active' : 'idle',
+                'journalPending': fields[2] == '1',
+                'generation': int.parse(fields[3]),
+              };
+            } catch (_) {
+              return <String, Object>{'leaseState': 'unknown'};
+            }
+          case 'prepare':
+            await _ensureHelper();
+            await _request('PING');
+            zeppDiagnostic('HELPER_PREPARED');
+            return null;
+          case 'begin':
+            await _ensureHelper();
+            await _request('BEGIN ${call.arguments as int}');
+            _active = true;
+            _heartbeat?.cancel();
+            _heartbeat = Timer.periodic(const Duration(seconds: 5), (_) async {
+              if (!_active) return;
+              try {
+                await _request('PING');
+              } catch (_) {
+                _active = false;
+                _heartbeat?.cancel();
+                try {
+                  await channel.invokeMethod<void>('leaseLost');
+                } catch (_) {
+                  /* Native worker may already be gone. */
+                }
+              }
+            });
+            return null;
+          case 'restore':
+            _active = false;
+            _heartbeat?.cancel();
+            await _ensureHelper(allowBootstrap: call.arguments == true);
+            await _request('RESTORE');
+            return null;
+          default:
+            throw MissingPluginException();
+        }
+      } on ZeppBootstrapException catch (error) {
+        zeppDiagnostic(error.code);
+        throw PlatformException(code: error.code, message: error.message);
       }
     });
   }
@@ -139,6 +179,7 @@ class EmbeddedAdb {
     if (port < 1 || port > 65535) {
       throw const FormatException('Porta non valida.');
     }
+    ++_connectionGeneration;
     await _subscription?.cancel();
     _subscription = null;
     _helper = null;
@@ -150,6 +191,7 @@ class EmbeddedAdb {
       verbose: false,
     );
     _connection = connection;
+    _nextStreamId = 0;
     try {
       if (!await connection.connect().timeout(const Duration(seconds: 12)) ||
           !connection.tlsEnabled) {
@@ -177,11 +219,36 @@ class EmbeddedAdb {
     }
   }
 
-  Future<void> _ensureHelper() async {
-    if (!ready && !await reconnect()) {
-      throw StateError('Ricollega il debug wireless in SyncBeat.');
-    }
+  Future<void> _ensureHelper({bool allowBootstrap = true}) async {
     if (_helper != null && !_helper!.isClosed) return;
+    if (!allowBootstrap) {
+      throw const ZeppBootstrapException(
+        'ADB_RECOVERY_UNAVAILABLE',
+        'Il canale del servizio non è disponibile per il ripristino. Usa Ripristina permessi Zepp.',
+      );
+    }
+    final pending = _preparation;
+    if (pending != null) return pending;
+    final preparation = _startHelper();
+    _preparation = preparation;
+    try {
+      await preparation;
+    } finally {
+      if (identical(_preparation, preparation)) _preparation = null;
+    }
+  }
+
+  Future<void> _startHelper() async {
+    final attempt = ++_bootstrapAttempt;
+    zeppDiagnostic('HELPER_ENSURE', request: attempt);
+    if (!ready && !await reconnect()) {
+      throw const ZeppBootstrapException(
+        'ADB_TRANSPORT_LOST',
+        'Ricollega il debug wireless in SyncBeat.',
+      );
+    }
+    final connection = _connection!;
+    final generation = _connectionGeneration;
     final info = await channel.invokeMapMethod<String, dynamic>('bootstrap');
     final apk = info?['apkPath'] as String? ?? '';
     if (info?['user'] != 0 ||
@@ -190,90 +257,80 @@ class EmbeddedAdb {
         'Il coordinamento ADB richiede il profilo principale di Android.',
       );
     }
-    var nonce = await _storage.read(key: 'embedded_adb_endpoint_v1');
-    if (nonce == null) {
-      final random = Random.secure();
-      nonce = List.generate(
-        32,
-        (_) => random.nextInt(16).toRadixString(16),
-      ).join();
-      await _storage.write(key: 'embedded_adb_endpoint_v1', value: nonce);
-    }
-    final name =
-        'syncbeat_zepp_${sha256.convert(utf8.encode('$nonce:$apk')).toString().substring(0, 32)}';
-    Future<AdbStream> open() => _connection!.open('localabstract:$name');
-    AdbStream stream;
-    try {
-      stream = await open();
-    } catch (_) {
-      final launch = await _connection!.open(
-        'shell:CLASSPATH=$apk nohup /system/bin/app_process /system/bin com.example.syncbeat.ZeppAdbLeaseServer $name </dev/null >/dev/null 2>&1 &',
-      );
-      await launch.onPayload.drain<void>().timeout(const Duration(seconds: 5));
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      stream = await open();
-    }
-    _helper = stream;
-    await _subscription?.cancel();
-    _subscription = stream.onPayload
-        .cast<List<int>>()
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .listen(
-          (line) {
-            final reply = _reply;
-            if (reply != null &&
-                !reply.isCompleted &&
-                line.startsWith('$_replyId|')) {
-              reply.complete(line.substring(line.indexOf('|') + 1));
-            }
-          },
-          onDone: _lostHelper,
-          onError: (_) => _lostHelper(),
+    final random = Random.secure();
+    final nonce = List.generate(
+      32,
+      (_) => random.nextInt(16).toRadixString(16),
+    ).join();
+    final name = 'syncbeat_zepp_$nonce';
+    void checkCurrent() {
+      if (generation != _connectionGeneration || !connection.connected) {
+        throw const ZeppBootstrapException(
+          'ADB_TRANSPORT_LOST',
+          'Il canale ADB si è interrotto durante la preparazione.',
         );
+      }
+    }
+
+    checkCurrent();
+    zeppDiagnostic('HELPER_LAUNCH', request: attempt);
+    // The legacy ADB shell has a PTY. Ignore HUP in the child directly so
+    // nohup cannot redirect READY away from that channel. Keep the parent
+    // waiting until the client receives READY and closes the startup stream.
+    final launch = await ZeppAdbStream.open(
+      connection,
+      ++_nextStreamId,
+      'shell:(trap "" HUP; CLASSPATH=$apk exec /system/bin/app_process /system/bin com.example.syncbeat.ZeppAdbLeaseServer $name </dev/null 2>/dev/null) & wait',
+    );
+    try {
+      await waitForZeppReady(launch.onPayload);
+      checkCurrent();
+      zeppDiagnostic('HELPER_READY', request: attempt);
+    } finally {
+      await launch.close();
+      zeppDiagnostic('HELPER_LAUNCH_CLOSED', request: attempt);
+    }
+    checkCurrent();
+    zeppDiagnostic('HELPER_SOCKET_OPEN', request: attempt);
+    final stream = await ZeppAdbStream.open(
+      connection,
+      ++_nextStreamId,
+      'localabstract:$name',
+    );
+    try {
+      checkCurrent();
+      await _subscription?.cancel();
+      _helper = stream;
+      _subscription = stream.onPayload
+          .cast<List<int>>()
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .listen(
+            _requests.receive,
+            onDone: () {
+              if (identical(_helper, stream)) _lostHelper();
+            },
+            onError: (_) {
+              if (identical(_helper, stream)) _lostHelper();
+            },
+          );
+      zeppDiagnostic('HELPER_SOCKET_OK', request: attempt);
+    } catch (_) {
+      await stream.close();
+      rethrow;
+    }
   }
 
   void _lostHelper() {
+    zeppDiagnostic('HELPER_LOST');
     _helper = null;
     if (_active) {
       _active = false;
       _heartbeat?.cancel();
       channel.invokeMethod<void>('leaseLost').ignore();
     }
-    final reply = _reply;
-    if (reply != null && !reply.isCompleted) {
-      reply.completeError(StateError('Collegamento al recupero interrotto.'));
-    }
+    _requests.disconnected();
   }
 
-  Future<void> _request(String command) {
-    final result = Completer<void>();
-    _queue = _queue.catchError((_) {}).then((_) async {
-      final reply = Completer<String>();
-      _reply = reply;
-      reply.future.ignore();
-      final id = '${++_sequence}';
-      _replyId = id;
-      try {
-        final stream = _helper;
-        if (stream == null ||
-            !await stream
-                .writeString('$id|$command\n')
-                .timeout(const Duration(seconds: 5))) {
-          throw StateError('Servizio permessi non disponibile.');
-        }
-        if (await reply.future.timeout(const Duration(seconds: 25)) != 'OK') {
-          throw StateError(
-            'Sospensione o ripristino dei permessi non confermato.',
-          );
-        }
-        result.complete();
-      } catch (error, stack) {
-        if (!result.isCompleted) result.completeError(error, stack);
-      } finally {
-        _reply = null;
-      }
-    });
-    return result.future;
-  }
+  Future<String> _request(String command) => _requests.request(command);
 }

@@ -11,6 +11,7 @@ object ZeppAdbLeaseServer {
     @JvmStatic fun main(args: Array<String>) {
         check(Process.myUid() == 2000 || Process.myUid() == 0)
         require(args.size == 1 && args[0].matches(Regex("syncbeat_zepp_[a-f0-9]{32}")))
+        ZeppDiagnostics.record("SERVER_START")
         val helper = ZeppPermissionService()
         val server = LocalServerSocket(args[0])
         val idle = Executors.newSingleThreadScheduledExecutor()
@@ -21,7 +22,21 @@ object ZeppAdbLeaseServer {
             if (System.nanoTime() - lastUse.get() > TimeUnit.MINUTES.toNanos(15)) runCatching { server.close() }
         }, 1, 1, TimeUnit.MINUTES)
         try {
-            runCatching { helper.restore() }
+            try {
+                helper.restore()
+                check(!helper.pendingRestore())
+            } catch (_: Exception) {
+                System.out.println("SYNCBEAT_RECOVERY_PENDING_V1")
+                System.out.flush()
+                System.out.close()
+                return
+            }
+            ZeppDiagnostics.record("SERVER_READY")
+            System.out.println("SYNCBEAT_READY_V1")
+            System.out.flush()
+            // Release only the startup pipe. The detached service keeps its socket,
+            // watchdog and durable recovery independently of the shell stream.
+            System.out.close()
             while (true) {
                 val client = server.accept()
                 try {
@@ -30,13 +45,26 @@ object ZeppAdbLeaseServer {
                     val input = client.inputStream.bufferedReader()
                     val output = client.outputStream.bufferedWriter()
                     while (true) {
-                        val request = input.readLine() ?: break
+                        val request = input.readLine()
+                        if (request == null) {
+                            ZeppDiagnostics.record("SERVER_CLIENT_EOF")
+                            break
+                        }
                         val id = request.substringBefore('|')
                         if (!id.matches(Regex("[0-9]{1,10}"))) break
                         val command = request.substringAfter('|', "")
-                        lastUse.set(System.nanoTime())
+                        if (command != "STATUS") lastUse.set(System.nanoTime())
+                        val code = when {
+                            command == "STATUS" -> "STATUS"
+                            command == "RESTORE" -> "RESTORE"
+                            command == "PING" -> "PING"
+                            command.startsWith("BEGIN ") -> "BEGIN"
+                            else -> "INVALID"
+                        }
+                        ZeppDiagnostics.record("SERVER_${code}_ENTER", "request=$id")
                         val response = try {
                             when {
+                                command == "STATUS" -> helper.diagnosticStatus()
                                 command == "PING" -> "OK"
                                 command == "RESTORE" -> { helper.restore(); if (helper.pendingRestore()) "ERR" else "OK" }
                                 command.startsWith("BEGIN ") -> {
@@ -46,11 +74,16 @@ object ZeppAdbLeaseServer {
                                 else -> "ERR"
                             }
                         } catch (_: Exception) { "ERR" }
+                        ZeppDiagnostics.record("SERVER_${code}_REPLY", "request=$id ok=${response != "ERR"}")
                         output.write("$id|$response"); output.newLine(); output.flush()
                     }
+                } catch (_: java.net.SocketTimeoutException) {
+                    ZeppDiagnostics.record("SERVER_CLIENT_TIMEOUT")
                 } catch (_: Exception) {
+                    ZeppDiagnostics.record("SERVER_CLIENT_ERROR")
                     // EOF, timeout and disconnect all follow the same rollback.
                 } finally {
+                    ZeppDiagnostics.record("SERVER_CLIENT_FINALLY")
                     runCatching { helper.restore() }
                     runCatching { client.close() }
                 }
