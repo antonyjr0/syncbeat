@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:syncbeat/features/audio_sources/public_audio_storage.dart';
 import 'package:syncbeat/features/zepp/zepp_client.dart';
 import 'package:syncbeat/features/zepp/zepp_transfer_dialog.dart';
+import 'package:syncbeat/features/zepp/zepp_direct_status.dart';
 
 const _goodKey = '00112233445566778899aabbccddeeff';
 
@@ -87,6 +88,42 @@ void main() {
 
   group('finestra', () {
     const file = PublishedAudio('content://media/42', 'Brano.mp3');
+
+    testWidgets(
+      'B1 prepares and reads status without permission or watch operations',
+      (tester) async {
+        final client = _FakeClient();
+        _tall(tester);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: ZeppTransferDialog(file: file, client: client),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final initialReads = client.coordinationReads;
+        final prepare = find.text('Prepara canale senza Wi-Fi (solo stato)');
+        await tester.ensureVisible(prepare);
+        await tester.tap(prepare);
+        await tester.pumpAndSettle();
+        final status = find.text('Verifica canale locale (solo stato)');
+        await tester.ensureVisible(status);
+        await tester.tap(status);
+        await tester.pumpAndSettle();
+        expect(client.offlineCalls, [true, false]);
+        expect(client.coordinationReads, initialReads);
+        expect(client.testCycles, 0);
+        expect(client.restores, 0);
+        expect(client.sent, isEmpty);
+        expect(client.verified, 0);
+        expect(client.coordinationEnabled, isFalse);
+        expect(
+          find.textContaining('Stato ricevuto direttamente'),
+          findsOneWidget,
+        );
+      },
+    );
 
     testWidgets(
       'gestione Zepp opt-in: prova senza file e recupero dopo errore',
@@ -294,12 +331,24 @@ class _FakeClient extends ZeppClient {
       pendingRestore = false,
       permissionError = false;
   int testCycles = 0, restores = 0;
+  int coordinationReads = 0;
+  final offlineCalls = <bool>[];
   @override
-  Future<Map<String, dynamic>> coordinationStatus() async => {
-    'state': 'ready',
-    'enabled': coordinationEnabled,
-    'pendingRestore': pendingRestore,
-  };
+  Future<ZeppDirectStatus> offlineHelperStatus({bool prepare = false}) async {
+    offlineCalls.add(prepare);
+    return const ZeppDirectStatus(uid: 2000, pid: 1234);
+  }
+
+  @override
+  Future<Map<String, dynamic>> coordinationStatus() async {
+    coordinationReads++;
+    return {
+      'state': 'ready',
+      'enabled': coordinationEnabled,
+      'pendingRestore': pendingRestore,
+    };
+  }
+
   @override
   Future<bool> authorizeCoordination() async => true;
   @override

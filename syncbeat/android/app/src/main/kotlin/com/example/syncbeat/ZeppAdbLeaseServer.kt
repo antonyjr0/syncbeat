@@ -10,6 +10,23 @@ import java.util.concurrent.TimeUnit
 object ZeppAdbLeaseServer {
     @JvmStatic fun main(args: Array<String>) {
         check(Process.myUid() == 2000 || Process.myUid() == 0)
+        if (args.contentEquals(arrayOf("--direct-status-v1"))) {
+            // The launching shell disables echo before this marker. Only then
+            // may Dart send the credential on stdin, never on the command line.
+            System.out.println("SYNCBEAT_DIRECT_INPUT_V1")
+            System.out.flush()
+            val secret = ZeppDirectStatusServer.readBootstrapSecret(System.`in`)
+            val statusServer = try { ZeppDirectStatusServer(secret, Process.myUid(), Process.myPid()) }
+                finally { secret.fill(0) }
+            statusServer.use {
+                System.out.println("SYNCBEAT_DIRECT_READY_V1:${it.port}")
+                System.out.flush()
+                System.`in`.close()
+                System.out.close()
+                it.serve()
+            }
+            return
+        }
         require(args.size == 1 && args[0].matches(Regex("syncbeat_zepp_[a-f0-9]{32}")))
         ZeppDiagnostics.record("SERVER_START")
         val helper = ZeppPermissionService()

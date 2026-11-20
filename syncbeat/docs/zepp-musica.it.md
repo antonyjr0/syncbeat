@@ -292,3 +292,15 @@ Errore osservato su "Verifica collegamento": `Reaf failed, socket might closed o
 - Se fallisce, il messaggio indica fase e tipo di errore con i millisecondi (es. `IOException dopo 12 ms`), mai chiave o indirizzo.
 
 Il codice e' scritto qui e usa solo API Android standard: da OronBox e' stato preso solo il confronto (UUID, cancelDiscovery), non il testo del codice. OronBox e' AGPL-3.0 con termini aggiuntivi (obbligo di attribuzione se se ne distribuisce codice); chi la cita come origine non ne e' limitato. Non e' una garanzia che l'orologio risponda: si sa solo dopo il test.
+
+## Canale locale senza Wi-Fi, checkpoint B1 del 20/11/2026
+
+Nel dialogo esistente **Invia all'orologio** sono disponibili **Prepara canale senza Wi-Fi (solo stato)** e **Verifica canale locale (solo stato)**. Questa versione del canale espone la lettura dello stato del servizio. L'integrazione dei comandi di sospensione, ripristino e invio offline segue i checkpoint successivi del piano.
+
+Con Wi-Fi e Debug wireless autorizzato, il primo pulsante avvia il servizio e apre una connessione autenticata su `127.0.0.1`. La porta locale viene assegnata dal sistema e comunicata nel bootstrap. Le letture successive usano direttamente quella connessione, anche quando ADB risulta scollegato. Il secondo pulsante esegue una singola lettura di stato. Un errore termina quella richiesta e viene mostrato nel dialogo.
+
+La sessione usa una credenziale casuale da 256 bit, inviata soltanto dopo che il processo ha confermato il proprio stdin con echo disabilitato. La credenziale rimane in memoria. Dopo l'autenticazione il listener chiude l'accesso a nuove connessioni e resta associato al solo collegamento autenticato. Il processo di prova termina quando quel collegamento viene chiuso. La terminazione di SyncBeat o dell'helper richiede una nuova preparazione con Wi-Fi e Debug wireless. Questo vale anche dopo il riavvio del telefono. La permanenza della sessione con schermo spento su HyperOS è da verificare.
+
+Il bootstrap B1 riusa il collegamento ADB autorizzato corrente oppure tenta una volta la porta salvata. La scoperta automatica della porta del Debug wireless appartiene all'incremento A2, ancora da realizzare. Se la connessione salvata fallisce, il dialogo richiede la configurazione del Debug wireless. Le conferme e l'attivazione del debug richieste da Android seguono le impostazioni di sistema.
+
+La prova reale B1 va concordata prima dell'installazione. Prevede preparazione con Wi-Fi, spegnimento temporaneo del Wi-Fi e una lettura di stato dal canale locale, con confronto dei permessi Zepp prima e dopo. Lo stato delle prove è riportato nella sezione **Modifiche apportate, 20 novembre 2026** del [resoconto](zepp-bootstrap-resoconto-2026-11-19.md).

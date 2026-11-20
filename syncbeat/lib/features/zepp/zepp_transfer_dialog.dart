@@ -141,6 +141,38 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog>
     }
   }
 
+  Future<void> _checkOfflineHelper({required bool prepare}) async {
+    setState(() {
+      _busy = true;
+      _failed = false;
+      _status = prepare
+          ? 'Preparazione del canale locale di prova…'
+          : 'Lettura dello stato dal canale locale…';
+    });
+    try {
+      await widget.client.offlineHelperStatus(prepare: prepare);
+      if (mounted) {
+        setState(
+          () => _status = prepare
+              ? 'Canale locale preparato. Ora puoi verificarne lo stato anche senza Wi-Fi.'
+              : 'Stato ricevuto direttamente dal servizio locale.',
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _failed = true;
+          _status = error is ZeppException
+              ? error.message
+              : 'Verifica del canale locale non riuscita.';
+        });
+      }
+    } finally {
+      // Reading the direct channel must not invoke status/recovery over ADB.
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _manageZeppPermissions({required bool test}) async {
     setState(() {
       _busy = true;
@@ -561,6 +593,19 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog>
             child: const Text('Prova sospensione e ripristino (senza file)'),
           ),
         ],
+        const Text(
+          'Canale locale di prova: legge soltanto lo stato del servizio. '
+          'Per prepararlo servono Wi-Fi e Debug wireless autorizzato. '
+          'Se app o servizio vengono terminati, va preparato di nuovo con Wi-Fi.',
+        ),
+        OutlinedButton(
+          onPressed: _busy ? null : () => _checkOfflineHelper(prepare: true),
+          child: const Text('Prepara canale senza Wi-Fi (solo stato)'),
+        ),
+        OutlinedButton(
+          onPressed: _busy ? null : () => _checkOfflineHelper(prepare: false),
+          child: const Text('Verifica canale locale (solo stato)'),
+        ),
         const SizedBox(height: 12),
         ListTile(
           contentPadding: EdgeInsets.zero,

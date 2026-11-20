@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_adb/adb_protocol.dart';
@@ -17,6 +18,7 @@ class FakeConnection extends AdbConnection {
   final changes = StreamController<bool>.broadcast();
   void Function(AdbStream)? onOpen;
   int opens = 0;
+  final destinations = <String>[];
   void Function(AdbStream, String)? onWrite;
   bool alive = true;
 
@@ -32,6 +34,7 @@ class FakeConnection extends AdbConnection {
     final header = ByteData.sublistView(data);
     if (header.getUint32(0, Endian.little) == AdbProtocol.CMD_OPEN) {
       opens++;
+      destinations.add(utf8.decode(data.sublist(24)));
       onOpen?.call(openStreams[header.getUint32(4, Endian.little)]!);
     } else if (header.getUint32(0, Endian.little) == AdbProtocol.CMD_WRTE) {
       onWrite?.call(
@@ -60,6 +63,86 @@ void main() {
   setUpAll(() {
     identity = AdbCrypto();
   });
+
+  test(
+    'B1 status survives ADB loss and bootstrap sends credential only on stdin',
+    () async {
+      final connection = FakeConnection(identity);
+      final adb = EmbeddedAdb.forTesting(connection);
+      final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      Socket? peer;
+      String? credential;
+      var bootstrapCalls = 0;
+      var directConnections = 0;
+      final accepted = server.listen((socket) {
+        directConnections++;
+        peer = socket;
+        socket
+            .cast<List<int>>()
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .listen((line) {
+              final id = line.split('|').first;
+              final command = line.substring(line.indexOf('|') + 1);
+              if (command.startsWith('AUTH ')) {
+                final valid = command.substring(5) == credential;
+                socket.write('$id|${valid ? 'OK' : 'ERR'}\n');
+              } else {
+                socket.write('$id|STATUS:1:2000:5678\n');
+              }
+            }, onError: (_) {});
+      });
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(EmbeddedAdb.channel, (call) async {
+            expect(call.method, 'bootstrap');
+            bootstrapCalls++;
+            return {'apkPath': '/data/app/test/base.apk', 'user': 0};
+          });
+      connection.onOpen = (stream) {
+        stream.remoteId = 10;
+        stream.readyForWrite();
+        stream.addPayload(
+          Uint8List.fromList(utf8.encode('SYNCBEAT_DIRECT_INPUT_V1\n')),
+        );
+      };
+      connection.onWrite = (stream, line) {
+        credential = line.trim();
+        stream.readyForWrite();
+        stream.addPayload(
+          Uint8List.fromList(
+            utf8.encode('SYNCBEAT_DIRECT_READY_V1:${server.port}\n'),
+          ),
+        );
+      };
+      try {
+        final status = await adb.prepareOfflineStatus();
+        expect(status.pid, 5678);
+        expect(connection.opens, 1);
+        expect(bootstrapCalls, 1);
+        expect(directConnections, 1);
+        expect(connection.destinations.single.contains(credential!), isFalse);
+        expect(
+          connection.destinations.single.contains('--direct-status-v1'),
+          isTrue,
+        );
+        connection.alive = false;
+        connection.changes.add(false);
+        expect(adb.ready, isFalse);
+        expect((await adb.offlineStatus()).pid, 5678);
+        expect((await adb.offlineStatus()).uid, 2000);
+        expect(connection.opens, 1);
+        expect(bootstrapCalls, 1);
+        expect(directConnections, 1);
+      } finally {
+        peer?.destroy();
+        await accepted.cancel();
+        await server.close();
+        await connection.changes.close();
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(EmbeddedAdb.channel, null);
+      }
+    },
+  );
 
   test(
     'concurrent preparation launches once and recovery reuses that socket',

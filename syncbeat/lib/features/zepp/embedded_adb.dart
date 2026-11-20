@@ -11,6 +11,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'zepp_adb_requests.dart';
 import 'zepp_adb_stream.dart';
 import 'zepp_diagnostics.dart';
+import 'zepp_direct_status.dart';
 
 Map<String, String> _generateAdbIdentity() =>
     AdbCrypto(adbKeyName: 'SyncBeat@self').exportKeyPairForStorage();
@@ -32,6 +33,8 @@ class EmbeddedAdb {
   int _nextStreamId = 0;
   int _connectionGeneration = 0;
   int _bootstrapAttempt = 0;
+  ZeppDirectStatusSession? _directStatus;
+  Future<ZeppDirectStatusSession>? _directPreparation;
   StreamSubscription<String>? _subscription;
   late final _requests = ZeppAdbRequests((line) async {
     final stream = _helper;
@@ -219,6 +222,91 @@ class EmbeddedAdb {
     }
   }
 
+  Future<ZeppDirectStatus> prepareOfflineStatus() async {
+    if (_active) {
+      throw const ZeppBootstrapException(
+        'DIRECT_BUSY',
+        'Attendi il ripristino di Zepp prima di preparare il canale locale.',
+      );
+    }
+    final existing = _directStatus;
+    if (existing != null && existing.connected) return existing.readStatus();
+    final preparation = _directPreparation ??= _startDirectStatus();
+    try {
+      final session = await preparation;
+      _directStatus = session;
+      return await session.readStatus();
+    } finally {
+      if (identical(_directPreparation, preparation)) _directPreparation = null;
+    }
+  }
+
+  Future<ZeppDirectStatus> offlineStatus() async {
+    final session = _directStatus;
+    if (session == null) {
+      throw const ZeppBootstrapException(
+        'DIRECT_UNAVAILABLE',
+        'Prepara prima il canale locale con Wi-Fi e Debug wireless autorizzato.',
+      );
+    }
+    return session.readStatus();
+  }
+
+  Future<ZeppDirectStatusSession> _startDirectStatus() async {
+    if (!ready && !await reconnect()) {
+      throw const ZeppBootstrapException(
+        'DIRECT_ADB_UNAVAILABLE',
+        'Per preparare il canale locale serve il Debug wireless collegato. Configuralo in SyncBeat.',
+      );
+    }
+    final connection = _connection!;
+    final generation = _connectionGeneration;
+    final apk = await _bootstrapApk();
+    // Independent from the public endpoint nonce of the permission helper.
+    // RAM only. It is sent once on stdin after the non-echo input marker.
+    final random = Random.secure();
+    final bytes = List<int>.generate(32, (_) => random.nextInt(256));
+    final credential = base64Encode(bytes);
+    bytes.fillRange(0, bytes.length, 0);
+    zeppDiagnostic('DIRECT_BOOTSTRAP_START');
+    final launch = await ZeppAdbStream.open(
+      connection,
+      ++_nextStreamId,
+      'shell:stty -echo && trap "" HUP && CLASSPATH=$apk exec /system/bin/app_process /system/bin com.example.syncbeat.ZeppAdbLeaseServer --direct-status-v1 2>/dev/null',
+    );
+    final int port;
+    try {
+      port = await exchangeDirectStatusBootstrap(
+        launch.onPayload,
+        launch.writeString,
+        credential,
+      );
+    } finally {
+      await launch.close();
+      zeppDiagnostic('DIRECT_BOOTSTRAP_CLOSED');
+    }
+    if (generation != _connectionGeneration) {
+      throw const ZeppBootstrapException(
+        'DIRECT_BOOTSTRAP_CANCELLED',
+        'La connessione ADB è cambiata durante la preparazione del canale locale.',
+      );
+    }
+    // From here the new session has no ADB dependency, including Wi-Fi loss.
+    return ZeppDirectStatusSession.connect(port, credential);
+  }
+
+  Future<String> _bootstrapApk() async {
+    final info = await channel.invokeMapMethod<String, dynamic>('bootstrap');
+    final apk = info?['apkPath'] as String? ?? '';
+    if (info?['user'] != 0 ||
+        !RegExp(r'^/data/app/[A-Za-z0-9_./~+=-]+/base\.apk$').hasMatch(apk)) {
+      throw StateError(
+        'Il coordinamento ADB richiede il profilo principale di Android.',
+      );
+    }
+    return apk;
+  }
+
   Future<void> _ensureHelper({bool allowBootstrap = true}) async {
     if (_helper != null && !_helper!.isClosed) return;
     if (!allowBootstrap) {
@@ -249,14 +337,7 @@ class EmbeddedAdb {
     }
     final connection = _connection!;
     final generation = _connectionGeneration;
-    final info = await channel.invokeMapMethod<String, dynamic>('bootstrap');
-    final apk = info?['apkPath'] as String? ?? '';
-    if (info?['user'] != 0 ||
-        !RegExp(r'^/data/app/[A-Za-z0-9_./~+=-]+/base\.apk$').hasMatch(apk)) {
-      throw StateError(
-        'Il coordinamento ADB richiede il profilo principale di Android.',
-      );
-    }
+    final apk = await _bootstrapApk();
     final random = Random.secure();
     final nonce = List.generate(
       32,
