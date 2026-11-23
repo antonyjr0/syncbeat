@@ -147,3 +147,26 @@ La prova proposta richiede l'accordo specifico previsto nei punti 3.5 e 5.5 del 
 4. Confrontare nuovamente permessi e flag con la baseline, poi riattivare il Wi-Fi. Riportare separatamente l'esito B1 e fermare l'avanzamento a quel checkpoint.
 
 La prova reale B1 resta pendente. Il passaggio a B2 segue il superamento di B1 e la preparazione del recupero del punto 5.4. Il modello concettuale di avvio privilegiato tramite ADB e i limiti di riavvio sono descritti anche nella [guida ufficiale Shizuku](https://shizuku.rikka.app/guide/setup/).
+
+## Modifiche apportate, 23 novembre 2026: verifica B1 sul telefono
+
+Progetto SyncBeat, punti 3.5 e 5.5/B1 del piano. L'utente ha richiesto l'installazione dell'aggiornamento per provarlo e ha eseguito i gesti dall'app. L'APK release del commit `28a2bd7` è stato installato via USB con `adb install -r`, esito `Success`, conservando i dati. Questa verifica aggiorna lo stato pendente riportato nella sezione del 20 novembre.
+
+**Esito B1: superato nelle condizioni osservate.** Il bootstrap ha consegnato il marcatore di input, poi `READY`; la shell è stata chiusa prima dell'autenticazione e delle letture dal canale diretto. I log mostrano un solo `DIRECT_BOOTSTRAP_START` e un solo `AUTH_WRITE`. Il servizio è rimasto lo stesso processo shell, UID 2000 e PID 23107.
+
+| Ora nel logcat del telefono | Evento |
+| --- | --- |
+| 11:35:53.936 | Avvio del bootstrap diretto. |
+| 11:35:54.238 | Conferma del canale di input. |
+| 11:35:54.242 | Ricezione di `READY` e chiusura del bootstrap. |
+| 11:35:54.249 | Autenticazione locale confermata. |
+| 11:35:54.250 | Prima risposta di stato, PID 23107. |
+| 11:36:01.443 | Perdita del precedente helper su ADB (`HELPER_LOST`). |
+| 11:36:04.370 | Ulteriore risposta dal canale diretto, stesso PID. |
+| 11:37:18.627, 11:37:23.589, 11:37:28.916 | Risposte di stato dallo stesso PID, senza nuovo bootstrap o nuova autenticazione. |
+
+La lettura indipendente via USB ha rilevato `wifi_on=0` e `adb_wifi_enabled=0` prima delle ultime due risposte e nuovamente al termine. Non è stato campionato l'istante esatto dello spegnimento. L'USB è servito alla raccolta dei log; le richieste di stato dell'app usano il collegamento locale Dart già autenticato. Non è stato letto il testo finale del dialogo tramite UI Automator; la conferma dell'esito deriva dalle risposte diagnostiche validate dall'app e dal PID del processo rilevato via USB.
+
+I tre permessi Zepp `BLUETOOTH_CONNECT`, `BLUETOOTH_SCAN` e `BLUETOOTH_ADVERTISE` risultano concessi, con flag identici alla baseline salvata prima della prova. Nessun `BEGIN_WRITE` o `RESTORE_WRITE` nei log raccolti. La directory del registro contiene soltanto `lease.lock`. L'utente ha eseguito anche la preparazione del precedente helper ADB, che nei log compie soltanto `PING` e `STATUS`.
+
+La prova valida il canale diretto in primo piano e la sua sopravvivenza alla chiusura della shell e alla perdita del Wi-Fi/Debug wireless. I tempi osservati rientrano nei limiti configurati, senza dimostrarne la validità in ogni condizione. Restano da verificare schermo spento/HyperOS e il recupero del punto 5.4. B2 e B3 non sono stati eseguiti; nessun invio MP3 in questa prova. Il checkpoint si ferma qui. Evidenze locali, escluse da Git, in `tools/zepp-transfer/b1-local-channel/`.
