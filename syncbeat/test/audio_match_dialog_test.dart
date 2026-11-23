@@ -12,6 +12,9 @@ import 'package:syncbeat/features/audio_sources/jamendo_provider.dart';
 import 'package:syncbeat/features/audio_sources/local_mp3_provider.dart';
 import 'package:syncbeat/features/audio_sources/staging_storage.dart';
 import 'package:syncbeat/models/spotify_models.dart';
+import 'package:syncbeat/features/zepp/zepp_download_transfer.dart';
+import 'package:syncbeat/features/zepp/zepp_client.dart';
+import 'package:syncbeat/features/audio_sources/public_audio_storage.dart';
 
 void main() {
   late Directory temporaryDirectory;
@@ -67,6 +70,38 @@ void main() {
     expect(find.textContaining('Selezione manuale richiesta'), findsOneWidget);
     expect(find.byType(RadioListTile<AudioCandidate>), findsNWidgets(2));
   });
+
+  testWidgets('download popup automatically sends the actual saved file', (
+    tester,
+  ) async {
+    final completed = _CompletedDownload();
+    final watch = _WatchTransfer();
+    final services = _services(
+      temporaryDirectory,
+      [_jamendoTrack()],
+      offlineUseAuthorized: true,
+      downloader: completed,
+      watchTransfer: watch,
+    );
+    await tester.pumpWidget(_app(services));
+    await tester.tap(find.text('Apri ricerca audio'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cerca su Jamendo'));
+    await tester.pumpAndSettle();
+    expect(find.text('Invia all’orologio'), findsNothing);
+    final download = find.text('Scarica MP3');
+    await tester.tap(download);
+    await tester.pumpAndSettle();
+    expect(watch.files.single.path, '/actual/staging/returned-2.mp3');
+    expect(watch.files.single.name, 'Returned title-2.mp3');
+    expect(find.text('Invia all’orologio'), findsNothing);
+    completed.fail = true;
+    await tester.tap(download);
+    await tester.pumpAndSettle();
+    expect(find.text('Invia all’orologio'), findsNothing);
+    expect(watch.files, hasLength(1));
+    expect(tester.takeException(), isNull);
+  });
 }
 
 Widget _app(_AudioServices services) => MaterialApp(
@@ -81,6 +116,7 @@ Widget _app(_AudioServices services) => MaterialApp(
               jamendoProvider: services.jamendo,
               localProvider: services.local,
               downloadManager: services.downloads,
+              watchTransfer: services.watchTransfer,
             ),
           ),
           child: const Text('Apri ricerca audio'),
@@ -92,11 +128,15 @@ Widget _app(_AudioServices services) => MaterialApp(
 
 _AudioServices _services(
   Directory directory,
-  List<Map<String, dynamic>> tracks,
-) {
+  List<Map<String, dynamic>> tracks, {
+  bool offlineUseAuthorized = false,
+  AudioSourceDownloader? downloader,
+  ZeppDownloadTransfer? watchTransfer,
+}) {
   final storage = AppDirectoryStagingStorage(applicationDirectory: directory);
   final jamendo = JamendoProvider(
     clientId: 'test-client-id',
+    offlineUseAuthorized: offlineUseAuthorized,
     httpClient: MockClient(
       (_) async => http.Response(
         jsonEncode({
@@ -116,13 +156,39 @@ _AudioServices _services(
     jamendo,
     local,
     AudioDownloadManager([
-      JamendoAudioDownloader(
-        stagingStorage: storage,
-        offlineUseAuthorized: false,
-      ),
+      downloader ??
+          JamendoAudioDownloader(
+            stagingStorage: storage,
+            offlineUseAuthorized: false,
+          ),
       local,
     ]),
+    watchTransfer,
   );
+}
+
+class _CompletedDownload implements AudioSourceDownloader {
+  bool fail = false;
+  @override
+  String get id => 'jamendo';
+  @override
+  bool canDownload(AudioCandidate candidate) => candidate.isAuthorizedDownload;
+  @override
+  Future<StagedAudioFile> download(
+    AudioCandidate candidate, {
+    required AudioDownloadProgress onProgress,
+    required DownloadCancellationToken cancellationToken,
+  }) async {
+    if (fail) throw const AudioSourceException('Download non riuscito');
+    return StagedAudioFile(
+      path: '/actual/staging/returned-2.mp3',
+      fileName: 'Returned title-2.mp3',
+      sizeBytes: 500,
+      sha256: 'test',
+      candidate: candidate,
+      stagedAt: DateTime(2026),
+    );
+  }
 }
 
 SpotifyTrack _track() => const SpotifyTrack(
@@ -146,11 +212,31 @@ Map<String, dynamic> _jamendoTrack({String id = '1'}) => {
 };
 
 class _AudioServices {
-  const _AudioServices(this.jamendo, this.local, this.downloads);
+  const _AudioServices(
+    this.jamendo,
+    this.local,
+    this.downloads,
+    this.watchTransfer,
+  );
 
   final JamendoProvider jamendo;
   final LocalMp3Provider local;
   final AudioDownloadManager downloads;
+  final ZeppDownloadTransfer? watchTransfer;
+}
+
+class _WatchTransfer extends ZeppDownloadTransfer {
+  final files = <PublishedAudio>[];
+  @override
+  Future<void> send(
+    PublishedAudio file, {
+    required String title,
+    required String artist,
+    required void Function(ZeppEvent) onEvent,
+  }) async {
+    files.add(file);
+    onEvent(const ZeppEvent.status('Invio completato'));
+  }
 }
 
 class _NoTagsReader implements LocalMp3TagReader {

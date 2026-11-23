@@ -8,6 +8,9 @@ import 'package:syncbeat/features/audio_sources/youtube_provider.dart';
 import 'package:syncbeat/features/audio_sources/youtube_downloader.dart';
 import 'package:syncbeat/features/audio_sources/staging_storage.dart';
 import 'package:syncbeat/models/spotify_models.dart';
+import 'package:syncbeat/features/zepp/zepp_download_transfer.dart';
+import 'package:syncbeat/features/zepp/zepp_client.dart';
+import 'package:syncbeat/features/audio_sources/public_audio_storage.dart';
 
 import 'youtube_test.dart' as fixtures;
 
@@ -97,6 +100,7 @@ void main() {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       SharedPreferences.setMockInitialValues({});
+      final watch = _WatchTransfer();
       await tester.binding.setSurfaceSize(const Size(393, 852));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final download = _Download();
@@ -114,6 +118,7 @@ void main() {
                     track: fixtures.track,
                     tools: const _Tools(),
                     downloader: download,
+                    watchTransfer: watch,
                     updateAndroidEngine: (_) async {
                       updates++;
                       if (updateFails) {
@@ -163,6 +168,8 @@ void main() {
       await tester.tap(button);
       await tester.pumpAndSettle();
       expect(download.calls, 1);
+      expect(watch.files.single.path, 'content://media/external/downloads/42');
+      expect(watch.files.single.name, 'tone.mp3');
       expect(find.text('Apri file'), findsOneWidget);
       expect(find.text('Apri cartella'), findsOneWidget);
       expect(
@@ -170,11 +177,29 @@ void main() {
         findsOneWidget,
       );
       expect(tester.takeException(), isNull);
+      expect(find.text('Invia all’orologio'), findsNothing);
+      watch.fail = true;
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      expect(watch.files, hasLength(2));
+      expect(find.text('Apri file'), findsOneWidget);
+      await tester.pumpAndSettle();
+      expect(watch.files, hasLength(2), reason: 'No automatic retry');
+      final downloadsBeforeSendRetry = download.calls;
+      watch.fail = false;
+      final send = find.text('Invia all’orologio');
+      await tester.ensureVisible(send);
+      await tester.tap(send);
+      await tester.pumpAndSettle();
+      expect(watch.files, hasLength(3));
+      expect(download.calls, downloadsBeforeSendRetry);
+      expect(find.text('Invia all’orologio'), findsNothing);
       download.fail = true;
       await tester.tap(button);
       await tester.pumpAndSettle();
       final error = find.text('Errore di prova del download.');
       expect(error, findsOneWidget);
+      expect(find.text('Invia all’orologio'), findsNothing);
       expect(tester.getRect(error).top, greaterThan(0));
       expect(tester.getRect(error).bottom, lessThan(852));
       expect(tester.widget<FilledButton>(button).onPressed, isNotNull);
@@ -339,4 +364,20 @@ void main() {
       expect(button.onPressed, isNull);
     },
   );
+}
+
+class _WatchTransfer extends ZeppDownloadTransfer {
+  final files = <PublishedAudio>[];
+  bool fail = false;
+  @override
+  Future<void> send(
+    PublishedAudio file, {
+    required String title,
+    required String artist,
+    required void Function(ZeppEvent) onEvent,
+  }) async {
+    files.add(file);
+    if (fail) throw const ZeppException('Invio di prova non riuscito');
+    onEvent(const ZeppEvent.status('Invio completato'));
+  }
 }

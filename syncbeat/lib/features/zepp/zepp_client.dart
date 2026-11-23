@@ -102,6 +102,11 @@ class ZeppClient {
   Future<void> forgetKey(ZeppDevice device) =>
       _storage.delete(key: _storageKey(device));
 
+  Future<String?> preferredDownloadDevice() =>
+      _storage.read(key: 'zepp_download_watch_v1');
+  Future<void> rememberDownloadDevice(ZeppDevice device) =>
+      _storage.write(key: 'zepp_download_watch_v1', value: device.address);
+
   Future<List<String>> probeParallelBle(ZeppDevice device) async {
     try {
       return await _channel.invokeListMethod<String>('probeBle', {

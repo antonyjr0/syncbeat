@@ -306,3 +306,13 @@ Il bootstrap B1 riusa il collegamento ADB autorizzato corrente oppure tenta una 
 La prova reale B1 va concordata prima dell'installazione. Prevede preparazione con Wi-Fi, spegnimento temporaneo del Wi-Fi e una lettura di stato dal canale locale, con confronto dei permessi Zepp prima e dopo. Lo stato delle prove è riportato nella sezione **Modifiche apportate, 20 novembre 2026** del [resoconto](zepp-bootstrap-resoconto-2026-11-19.md).
 
 Il 23 novembre 2026 il checkpoint B1 è riuscito sul telefono HyperOS: lo stesso servizio ha risposto con Wi-Fi e Debug wireless spenti, senza nuovi bootstrap e con permessi Zepp invariati. La verifica riguarda il solo stato, con app in primo piano. Sospensione, ripristino e invio senza Wi-Fi restano ai checkpoint successivi; dettagli ed evidenze nella sezione del 23 novembre del resoconto.
+
+## Download e invio automatico, 23 novembre 2026
+
+Su Android, dopo il salvataggio di un MP3 dal popup YouTube o Jamendo/MP3 locale, SyncBeat avvia un singolo invio all’orologio configurato. Preparazione, avanzamento ed esito compaiono nello stesso popup di download. Tieni l’app aperta fino al completamento. Il file usato è quello restituito dal salvataggio, anche quando Android restituisce un URI `content://`.
+
+Se esiste già un solo orologio con chiave salvata e la gestione automatica di Zepp è attiva, non occorre aprire altre finestre. Altrimenti compare **Configura invio automatico**: scegli l’orologio, usa la chiave già salvata oppure inseriscila e collega il Debug wireless. **Salva e continua** memorizza la scelta; la configurazione da sola non sospende permessi e non invia musica. Le conferme di sistema di Android restano necessarie.
+
+Un errore di invio lascia il file salvato e mostra **Invia all’orologio** per un nuovo tentativo esplicito, senza riscaricare il file. Non partono tentativi automatici aggiuntivi né invii in coda. Un ripristino Zepp pendente blocca il nuovo invio e mostra le indicazioni di recupero. Chiudere il popup o annullare l’operazione interrompe l’invio usando il percorso di annullamento e ripristino esistente.
+
+Questo incremento usa ancora il flusso di sospensione e ripristino tramite Wi-Fi/ADB. Il canale locale B1 continua a esporre soltanto lo stato: l’invio senza Wi-Fi resta da implementare e verificare nei checkpoint successivi. **MP3 locali** conserva il percorso manuale già esistente. Le autorizzazioni al download e all’uso offline delle fonti mantengono le verifiche precedenti.

@@ -90,6 +90,56 @@ void main() {
     const file = PublishedAudio('content://media/42', 'Brano.mp3');
 
     testWidgets(
+      'one-time setup saves the chosen watch without any transfer or permission cycle',
+      (tester) async {
+        final client = _FakeClient();
+        _tall(tester);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: TextButton(
+                  onPressed: () => showDialog<bool>(
+                    context: context,
+                    builder: (_) => ZeppTransferDialog(
+                      file: file,
+                      client: client,
+                      configureOnly: true,
+                    ),
+                  ),
+                  child: const Text('Configura'),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('Configura'));
+        await tester.pumpAndSettle();
+        expect(
+          find.text('Prepara canale senza Wi-Fi (solo stato)'),
+          findsNothing,
+        );
+        expect(
+          find.text('Prova sospensione e ripristino (senza file)'),
+          findsNothing,
+        );
+        await tester.tap(find.byType(DropdownButtonFormField<ZeppDevice>));
+        await tester.pumpAndSettle();
+        await tester.tap(find.textContaining('Orologio test').last);
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byType(TextField), _goodKey);
+        await tester.tap(find.text('Salva e continua'));
+        await tester.pumpAndSettle();
+        expect(client.preferredDevice, 'AA:BB:CC:DD:EE:FF');
+        expect(client.coordinationEnabled, isTrue);
+        expect(client.sent, isEmpty);
+        expect(client.testCycles, 0);
+        expect(client.restores, 0);
+        expect(find.byType(ZeppTransferDialog), findsNothing);
+      },
+    );
+
+    testWidgets(
       'B1 prepares and reads status without permission or watch operations',
       (tester) async {
         final client = _FakeClient();
@@ -327,6 +377,12 @@ void main() {
 }
 
 class _FakeClient extends ZeppClient {
+  String? preferredDevice;
+  @override
+  Future<void> rememberDownloadDevice(ZeppDevice device) async {
+    preferredDevice = device.address;
+  }
+
   bool coordinationEnabled = false,
       pendingRestore = false,
       permissionError = false;
