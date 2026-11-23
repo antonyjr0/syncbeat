@@ -71,37 +71,43 @@ void main() {
     expect(find.byType(RadioListTile<AudioCandidate>), findsNWidgets(2));
   });
 
-  testWidgets('download popup automatically sends the actual saved file', (
-    tester,
-  ) async {
-    final completed = _CompletedDownload();
-    final watch = _WatchTransfer();
-    final services = _services(
-      temporaryDirectory,
-      [_jamendoTrack()],
-      offlineUseAuthorized: true,
-      downloader: completed,
-      watchTransfer: watch,
-    );
-    await tester.pumpWidget(_app(services));
-    await tester.tap(find.text('Apri ricerca audio'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Cerca su Jamendo'));
-    await tester.pumpAndSettle();
-    expect(find.text('Invia all’orologio'), findsNothing);
-    final download = find.text('Scarica MP3');
-    await tester.tap(download);
-    await tester.pumpAndSettle();
-    expect(watch.files.single.path, '/actual/staging/returned-2.mp3');
-    expect(watch.files.single.name, 'Returned title-2.mp3');
-    expect(find.text('Invia all’orologio'), findsNothing);
-    completed.fail = true;
-    await tester.tap(download);
-    await tester.pumpAndSettle();
-    expect(find.text('Invia all’orologio'), findsNothing);
-    expect(watch.files, hasLength(1));
-    expect(tester.takeException(), isNull);
-  });
+  testWidgets(
+    'download alone never sends; the button sends the actual saved file',
+    (tester) async {
+      final completed = _CompletedDownload();
+      final watch = _WatchTransfer();
+      final services = _services(
+        temporaryDirectory,
+        [_jamendoTrack()],
+        offlineUseAuthorized: true,
+        downloader: completed,
+        watchTransfer: watch,
+      );
+      await tester.pumpWidget(_app(services));
+      await tester.tap(find.text('Apri ricerca audio'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cerca su Jamendo'));
+      await tester.pumpAndSettle();
+      expect(find.text('Invia all’orologio'), findsNothing);
+      final download = find.text('Scarica MP3');
+      await tester.tap(download);
+      await tester.pumpAndSettle();
+      expect(watch.files, isEmpty);
+      final send = find.text('Invia all’orologio');
+      await tester.ensureVisible(send);
+      await tester.tap(send);
+      await tester.pumpAndSettle();
+      expect(watch.files.single.path, '/actual/staging/returned-2.mp3');
+      expect(watch.files.single.name, 'Returned title-2.mp3');
+      expect(find.text('Invia all’orologio'), findsOneWidget);
+      completed.fail = true;
+      await tester.tap(download);
+      await tester.pumpAndSettle();
+      expect(find.text('Invia all’orologio'), findsNothing);
+      expect(watch.files, hasLength(1));
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
 Widget _app(_AudioServices services) => MaterialApp(

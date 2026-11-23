@@ -341,9 +341,6 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
               'MP3 salvato in Download/SyncBeat: ${file.fileName}\n${file.path}';
         });
         _revealStatus();
-        if (defaultTargetPlatform == TargetPlatform.android) {
-          await _sendDownloaded(file, allowSetup: true);
-        }
       }
     } catch (error) {
       // Log only the error type; full details remain in the user's dialog.
@@ -489,8 +486,8 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
             ),
             if (defaultTargetPlatform == TargetPlatform.android)
               const Text(
-                'Dopo il salvataggio il brano viene inviato all’orologio configurato. '
-                'Tieni SyncBeat aperta fino alla fine.',
+                'Dopo il salvataggio puoi premere Invia all’orologio. '
+                'Il download da solo non avvia l’invio.',
               ),
             if (_saved != null)
               ListTile(
@@ -539,11 +536,10 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
                     icon: const Icon(Icons.folder_open),
                     label: const Text('Apri cartella'),
                   ),
-                  if (_transferFailed &&
-                      defaultTargetPlatform == TargetPlatform.android)
+                  if (defaultTargetPlatform == TargetPlatform.android)
                     TextButton.icon(
                       onPressed: _operation != null ? null : _retryWatchSend,
-                      icon: const Icon(Icons.watch),
+                      icon: Icon(_transferFailed ? Icons.refresh : Icons.watch),
                       label: const Text('Invia all’orologio'),
                     ),
                 ],

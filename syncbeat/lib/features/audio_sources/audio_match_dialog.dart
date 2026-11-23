@@ -239,9 +239,6 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
       );
       if (mounted) {
         setState(() => _stagedFile = stagedFile);
-        if (defaultTargetPlatform == TargetPlatform.android) {
-          await _sendSavedFile(stagedFile, allowSetup: true);
-        }
       }
     } catch (error) {
       if (mounted) setState(() => _errorMessage = error.toString());
@@ -342,8 +339,8 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
             ),
             if (defaultTargetPlatform == TargetPlatform.android)
               const Text(
-                'Dopo il salvataggio il brano viene inviato all’orologio configurato. '
-                'Tieni SyncBeat aperta fino alla fine.',
+                'Dopo il salvataggio puoi premere Invia all’orologio. '
+                'Il download da solo non avvia l’invio.',
               ),
             SizedBox(height: 18),
             Wrap(
@@ -447,13 +444,12 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
                 ),
               ),
               if (_watchMessage != null) Text(_watchMessage!),
-              if (_transferFailed &&
-                  defaultTargetPlatform == TargetPlatform.android)
+              if (defaultTargetPlatform == TargetPlatform.android)
                 TextButton.icon(
                   onPressed: _downloading || _searching
                       ? null
                       : _retryWatchSend,
-                  icon: const Icon(Icons.watch),
+                  icon: Icon(_transferFailed ? Icons.refresh : Icons.watch),
                   label: const Text('Invia all’orologio'),
                 ),
             ],

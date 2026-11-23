@@ -566,7 +566,7 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog>
   Widget build(BuildContext context) => AlertDialog(
     title: Text(
       widget.configureOnly
-          ? 'Configura invio automatico'
+          ? 'Configura invio all’orologio'
           : 'Invia all\'orologio',
     ),
     content: SizedBox(
@@ -595,7 +595,7 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog>
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       const Text(
-        'Configura una volta l’orologio. I download successivi verranno inviati automaticamente. '
+        'Configura una volta l’orologio. Per inviare un brano premi Invia all’orologio dopo il download. '
         'SyncBeat sospende temporaneamente Dispositivi nelle vicinanze di Zepp durante l’invio '
         'e ripristina lo stato iniziale alla fine. Tieni l’app aperta fino al completamento.',
       ),

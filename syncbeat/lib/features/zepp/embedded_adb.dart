@@ -4,7 +4,7 @@ import 'dart:isolate';
 import 'dart:math';
 
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_adb/flutter_adb.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -12,6 +12,7 @@ import 'zepp_adb_requests.dart';
 import 'zepp_adb_stream.dart';
 import 'zepp_diagnostics.dart';
 import 'zepp_direct_status.dart';
+import 'adb_connect_discovery.dart';
 
 Map<String, String> _generateAdbIdentity() =>
     AdbCrypto(adbKeyName: 'SyncBeat@self').exportKeyPairForStorage();
@@ -43,6 +44,13 @@ class EmbeddedAdb {
   Timer? _heartbeat;
   bool _active = false;
   int? _port;
+  Future<void>? _automaticConnection;
+  Future<void>? _startup;
+  Future<void>? _openingPreparation;
+  AppLifecycleListener? _appLifecycle;
+  bool _wasInBackground = false;
+  final startupStatus = ValueNotifier<String?>(null);
+  final startupFailed = ValueNotifier<bool>(false);
 
   bool get ready =>
       _connection?.connected == true && _connection?.tlsEnabled == true;
@@ -212,17 +220,118 @@ class EmbeddedAdb {
 
   Future<bool> reconnect() async {
     if (ready) return true;
-    final saved = await _storage.read(key: 'embedded_adb_port_v1');
-    if (saved == null) return false;
     try {
-      await connect(validatePort(saved));
+      await connectAutomatically();
       return ready;
     } catch (_) {
       return false;
     }
   }
 
-  Future<ZeppDirectStatus> prepareOfflineStatus() async {
+  /// One discovery and one TLS connection. No saved-port retry on failure.
+  Future<void> connectAutomatically() async {
+    if (ready) return;
+    final pending = _automaticConnection;
+    if (pending != null) return pending;
+    final operation = _discoverAndConnect();
+    _automaticConnection = operation;
+    try {
+      await operation;
+    } finally {
+      if (identical(_automaticConnection, operation)) {
+        _automaticConnection = null;
+      }
+    }
+  }
+
+  Future<void> _discoverAndConnect() async {
+    zeppDiagnostic('ADB_DISCOVERY_START');
+    try {
+      final snapshot = await channel
+          .invokeMapMethod<Object?, Object?>('discoverConnect')
+          .timeout(const Duration(seconds: 12));
+      final port = selectSelfAdbConnectPort(snapshot ?? {});
+      zeppDiagnostic('ADB_DISCOVERY_SELECTED');
+      await connect(port);
+      zeppDiagnostic('ADB_AUTO_CONNECTED');
+    } catch (error) {
+      zeppDiagnostic('ADB_AUTO_CONNECT_ERROR');
+      final code = error is ZeppBootstrapException
+          ? error.code
+          : error is PlatformException
+          ? error.code
+          : null;
+      if (code != null && RegExp(r'^ADB_DISCOVERY_[A-Z_]+$').hasMatch(code)) {
+        zeppDiagnostic(code);
+      }
+      rethrow;
+    }
+  }
+
+  /// Called once when this app process opens. Observations and foreground
+  /// resumes never create a retry loop. No BEGIN, restore or music command.
+  Future<void> prepareOnOpen() => _startup ??= prepareOnForeground();
+
+  void startAutomaticPreparation() {
+    if (_appLifecycle != null) return;
+    _appLifecycle = AppLifecycleListener(
+      onPause: () => _wasInBackground = true,
+      onResume: () {
+        if (_wasInBackground) {
+          _wasInBackground = false;
+          unawaited(prepareOnForeground());
+        }
+      },
+    );
+    unawaited(prepareOnOpen());
+  }
+
+  /// A genuine app reopening is a new user action, not a timer retry.
+  Future<void> prepareOnForeground() async {
+    if (ready && _directStatus?.connected == true) return;
+    final pending = _openingPreparation;
+    if (pending != null) return pending;
+    final operation = _prepareOnOpen();
+    _openingPreparation = operation;
+    try {
+      await operation;
+    } finally {
+      if (identical(_openingPreparation, operation)) _openingPreparation = null;
+    }
+  }
+
+  Future<void> _prepareOnOpen() async {
+    try {
+      await prepareForUse();
+    } catch (_) {
+      /* Visible status, no automatic retry. */
+    }
+  }
+
+  /// Explicit setup completion may prepare the already-connected channel.
+  Future<void> prepareForUse({bool alreadyConnected = false}) async {
+    startupStatus.value = 'Preparazione del collegamento all’orologio…';
+    startupFailed.value = false;
+    try {
+      if (!alreadyConnected) await connectAutomatically();
+      // B1 is read-only: preparing it cannot suspend Zepp's permissions.
+      await prepareOfflineStatus(allowReconnect: false);
+      startupStatus.value =
+          'Collegamento preparato. Per inviare un brano premi Invia all’orologio.';
+      zeppDiagnostic('APP_PREPARATION_READY');
+    } catch (_) {
+      startupFailed.value = true;
+      startupStatus.value =
+          'Preparazione non riuscita. Controlla Wi-Fi e Debug wireless. '
+          'La prima volta autorizza SyncBeat dalla configurazione.';
+      zeppDiagnostic('APP_PREPARATION_ERROR');
+      rethrow;
+    }
+  }
+
+  Future<ZeppDirectStatus> prepareOfflineStatus({
+    bool allowReconnect = true,
+  }) async {
     if (_active) {
       throw const ZeppBootstrapException(
         'DIRECT_BUSY',
@@ -231,7 +340,9 @@ class EmbeddedAdb {
     }
     final existing = _directStatus;
     if (existing != null && existing.connected) return existing.readStatus();
-    final preparation = _directPreparation ??= _startDirectStatus();
+    final preparation = _directPreparation ??= _startDirectStatus(
+      allowReconnect: allowReconnect,
+    );
     try {
       final session = await preparation;
       _directStatus = session;
@@ -252,8 +363,10 @@ class EmbeddedAdb {
     return session.readStatus();
   }
 
-  Future<ZeppDirectStatusSession> _startDirectStatus() async {
-    if (!ready && !await reconnect()) {
+  Future<ZeppDirectStatusSession> _startDirectStatus({
+    bool allowReconnect = true,
+  }) async {
+    if (!ready && (!allowReconnect || !await reconnect())) {
       throw const ZeppBootstrapException(
         'DIRECT_ADB_UNAVAILABLE',
         'Per preparare il canale locale serve il Debug wireless collegato. Configuralo in SyncBeat.',

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'app.dart';
 import 'features/zepp/embedded_adb.dart';
@@ -6,6 +7,9 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   EmbeddedAdb.instance.register();
   runApp(const SyncBeatApp());
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    EmbeddedAdb.instance.startAutomaticPreparation();
+  }
 }
 
 class MyApp extends StatelessWidget {

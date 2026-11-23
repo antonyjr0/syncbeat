@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import 'config/app_config.dart';
 import 'theme/syncbeat_theme.dart';
@@ -9,6 +10,8 @@ import 'models/spotify_models.dart';
 import 'services/metadata_cache.dart';
 import 'services/spotify_api_service.dart';
 import 'services/spotify_auth_service.dart';
+import 'features/zepp/embedded_adb.dart';
+import 'features/zepp/embedded_adb_setup.dart';
 
 class SyncBeatApp extends StatelessWidget {
   const SyncBeatApp({
@@ -275,6 +278,27 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
               ),
               children: [
                 _buildHeader(colorScheme),
+                if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
+                  ValueListenableBuilder<String?>(
+                    valueListenable: EmbeddedAdb.instance.startupStatus,
+                    builder: (context, message, _) => message == null
+                        ? const SizedBox.shrink()
+                        : Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(message),
+                                if (EmbeddedAdb.instance.startupFailed.value)
+                                  TextButton(
+                                    onPressed: () =>
+                                        showEmbeddedAdbSetup(context),
+                                    child: const Text('Configura collegamento'),
+                                  ),
+                              ],
+                            ),
+                          ),
+                  ),
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(

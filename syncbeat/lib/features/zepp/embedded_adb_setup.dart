@@ -20,8 +20,10 @@ class _EmbeddedAdbSetupState extends State<EmbeddedAdbSetup> {
   );
   bool _busy = false;
   String? _message;
+  bool _connectionError = false;
 
-  Future<void> _run(bool pairing) async {
+  Future<void> _run(bool pairing, {bool manual = false}) async {
+    var connecting = !pairing;
     setState(() {
       _busy = true;
       _message = pairing
@@ -31,29 +33,38 @@ class _EmbeddedAdbSetupState extends State<EmbeddedAdbSetup> {
     try {
       if (pairing) {
         await EmbeddedAdb.instance.pairFromNotification();
-      } else {
+        connecting = true;
+      }
+      if (manual) {
         await EmbeddedAdb.instance.connect(
           EmbeddedAdb.validatePort(_connectPort.text),
         );
+      } else {
+        await EmbeddedAdb.instance.connectAutomatically();
       }
+      await EmbeddedAdb.instance.prepareForUse(alreadyConnected: true);
       if (mounted) {
-        setState(
-          () => _message = pairing
-              ? 'Abbinamento riuscito. Inserisci ora la porta principale di Debug wireless e premi Collega.'
-              : 'ADB collegato in SyncBeat. Puoi chiudere e attivare Gestisci automaticamente Zepp.',
-        );
+        setState(() {
+          _connectionError = false;
+          _message =
+              'Collegamento autorizzato e pronto in SyncBeat. Puoi chiudere questa finestra.';
+        });
       }
     } on PlatformException catch (error) {
       if (mounted) {
-        setState(() => _message = error.message ?? 'Operazione non riuscita.');
+        setState(() {
+          _connectionError = connecting;
+          _message = error.message ?? 'Operazione non riuscita.';
+        });
       }
     } catch (_) {
       if (mounted) {
-        setState(
-          () => _message = pairing
+        setState(() {
+          _connectionError = connecting;
+          _message = !connecting
               ? 'Abbinamento non riuscito. Riprova con un nuovo codice.'
-              : 'Connessione non riuscita. Usa la porta della pagina principale Debug wireless, non quella di abbinamento.',
-        );
+              : 'Connessione automatica non riuscita. Controlla Wi-Fi e Debug wireless. Puoi usare la porta manuale come recupero.';
+        });
       }
     } finally {
       if (mounted) {
@@ -86,7 +97,9 @@ class _EmbeddedAdbSetupState extends State<EmbeddedAdbSetup> {
                   ? null
                   : () async {
                       try {
-                        await EmbeddedAdb.channel.invokeMethod<void>('settings');
+                        await EmbeddedAdb.channel.invokeMethod<void>(
+                          'settings',
+                        );
                       } on PlatformException catch (error) {
                         if (mounted) setState(() => _message = error.message);
                       }
@@ -102,20 +115,28 @@ class _EmbeddedAdbSetupState extends State<EmbeddedAdbSetup> {
             ),
             const SizedBox(height: 12),
             const Text(
-              'Dopo l’abbinamento, torna alla pagina principale Debug wireless. La porta di connessione è diversa e può cambiare dopo un riavvio.',
+              'La porta di connessione viene individuata automaticamente. '
+              'Dopo il primo abbinamento l’app prepara il collegamento a ogni apertura. '
+              'Android può richiedere di riattivare Debug wireless dopo un riavvio.',
             ),
-            TextField(
-              controller: _connectPort,
-              enabled: !_busy,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Porta di connessione',
+            if (_connectionError)
+              TextField(
+                controller: _connectPort,
+                enabled: !_busy,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Porta di connessione',
+                ),
               ),
-            ),
             FilledButton(
               onPressed: _busy ? null : () => _run(false),
-              child: const Text('Collega'),
+              child: const Text('Collega automaticamente'),
             ),
+            if (_connectionError)
+              TextButton(
+                onPressed: _busy ? null : () => _run(false, manual: true),
+                child: const Text('Collega con porta manuale'),
+              ),
             if (_busy) const LinearProgressIndicator(),
             if (_message != null) Text(_message!),
           ],

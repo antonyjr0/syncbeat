@@ -47,7 +47,7 @@ class ZeppDownloadTransfer {
       }
       if (configured.length != 1) {
         throw const ZeppDownloadSetupRequired(
-          'Configura un solo orologio per l’invio automatico.',
+          'Scegli l’orologio da usare per l’invio.',
         );
       }
       final state = await client.coordinationStatus();
@@ -61,7 +61,7 @@ class ZeppDownloadTransfer {
       }
       if (state['enabled'] != true) {
         throw const ZeppDownloadSetupRequired(
-          'Completa la configurazione iniziale dell’invio automatico.',
+          'Completa la configurazione iniziale dell’invio.',
         );
       }
       final (device, key) = configured.single;

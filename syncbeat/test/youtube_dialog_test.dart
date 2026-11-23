@@ -168,8 +168,7 @@ void main() {
       await tester.tap(button);
       await tester.pumpAndSettle();
       expect(download.calls, 1);
-      expect(watch.files.single.path, 'content://media/external/downloads/42');
-      expect(watch.files.single.name, 'tone.mp3');
+      expect(watch.files, isEmpty, reason: 'Download never starts a transfer');
       expect(find.text('Apri file'), findsOneWidget);
       expect(find.text('Apri cartella'), findsOneWidget);
       expect(
@@ -177,9 +176,15 @@ void main() {
         findsOneWidget,
       );
       expect(tester.takeException(), isNull);
-      expect(find.text('Invia all’orologio'), findsNothing);
+      final send = find.text('Invia all’orologio');
+      await tester.ensureVisible(send);
+      await tester.tap(send);
+      await tester.pumpAndSettle();
+      expect(watch.files.single.path, 'content://media/external/downloads/42');
+      expect(watch.files.single.name, 'tone.mp3');
       watch.fail = true;
-      await tester.tap(button);
+      await tester.ensureVisible(send);
+      await tester.tap(send);
       await tester.pumpAndSettle();
       expect(watch.files, hasLength(2));
       expect(find.text('Apri file'), findsOneWidget);
@@ -187,13 +192,12 @@ void main() {
       expect(watch.files, hasLength(2), reason: 'No automatic retry');
       final downloadsBeforeSendRetry = download.calls;
       watch.fail = false;
-      final send = find.text('Invia all’orologio');
       await tester.ensureVisible(send);
       await tester.tap(send);
       await tester.pumpAndSettle();
       expect(watch.files, hasLength(3));
       expect(download.calls, downloadsBeforeSendRetry);
-      expect(find.text('Invia all’orologio'), findsNothing);
+      expect(find.text('Invia all’orologio'), findsOneWidget);
       download.fail = true;
       await tester.tap(button);
       await tester.pumpAndSettle();

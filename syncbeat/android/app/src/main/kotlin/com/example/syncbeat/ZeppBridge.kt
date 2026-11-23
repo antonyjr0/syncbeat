@@ -42,11 +42,13 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
     private var bleProbe: ZeppBleProbe? = null
     private val cancelled = AtomicBoolean(false)
     private val adbPairing = AdbPairingNotification(activity)
+    private val adbDiscovery = AdbConnectDiscovery(activity)
     private lateinit var adbChannel: MethodChannel
     fun configureAdb(messenger: io.flutter.plugin.common.BinaryMessenger) {
         adbChannel = MethodChannel(messenger, "syncbeat/embedded_adb")
         adbChannel.setMethodCallHandler { call, result ->
             when (call.method) {
+                "discoverConnect" -> adbDiscovery.discover(result)
                 "pairFromNotification" -> adbPairing.start(result)
                 "cancelPairingNotification" -> { adbPairing.cancel(); result.success(null) }
                 "bootstrap" -> result.success(mapOf("apkPath" to activity.applicationInfo.sourceDir,

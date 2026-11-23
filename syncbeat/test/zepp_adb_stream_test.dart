@@ -56,6 +56,19 @@ Future<Object?> invokeEmbedded(String method, [Object? arguments]) async {
   return codec.decodeEnvelope((await reply.future)!);
 }
 
+class RecordingEmbedded extends EmbeddedAdb {
+  RecordingEmbedded(this.fake) : super.forTesting(fake);
+  final FakeConnection fake;
+  final connectedPorts = <int>[];
+  bool refuse = false;
+  @override
+  Future<void> connect(int port) async {
+    connectedPorts.add(port);
+    if (refuse) throw StateError('Connection refused');
+    fake.alive = true;
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   ServicesBinding.instance.channelBuffers.resize(EmbeddedAdb.channel.name, 10);
@@ -63,6 +76,52 @@ void main() {
   setUpAll(() {
     identity = AdbCrypto();
   });
+
+  for (final refuse in [false, true]) {
+    test(
+      'automatic discovery connects once, without a saved-port fallback; refusal=$refuse',
+      () async {
+        final connection = FakeConnection(identity)..alive = false;
+        final adb = RecordingEmbedded(connection)..refuse = refuse;
+        var discoveries = 0;
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(EmbeddedAdb.channel, (call) async {
+              expect(call.method, 'discoverConnect');
+              discoveries++;
+              return {
+                'localAddresses': ['192.0.2.1'],
+                'services': [
+                  {
+                    'name': 'adb-self-connect',
+                    'type': '_adb-tls-connect._tcp',
+                    'addresses': ['192.0.2.1'],
+                    'port': 43210,
+                  },
+                ],
+              };
+            });
+        addTearDown(
+          () => TestDefaultBinaryMessengerBinding
+              .instance
+              .defaultBinaryMessenger
+              .setMockMethodCallHandler(EmbeddedAdb.channel, null),
+        );
+        final preparing = Future.wait([
+          adb.connectAutomatically(),
+          adb.connectAutomatically(),
+        ]);
+        if (refuse) {
+          await expectLater(preparing, throwsStateError);
+        } else {
+          await preparing;
+        }
+        expect(discoveries, 1);
+        expect(adb.connectedPorts, [43210]);
+        expect(connection.opens, 0);
+        await connection.changes.close();
+      },
+    );
+  }
 
   test(
     'B1 status survives ADB loss and bootstrap sends credential only on stdin',
@@ -115,7 +174,9 @@ void main() {
         );
       };
       try {
-        final status = await adb.prepareOfflineStatus();
+        await Future.wait([adb.prepareOnOpen(), adb.prepareOnOpen()]);
+        expect(adb.startupFailed.value, isFalse);
+        final status = await adb.offlineStatus();
         expect(status.pid, 5678);
         expect(connection.opens, 1);
         expect(bootstrapCalls, 1);
@@ -127,6 +188,8 @@ void main() {
         );
         connection.alive = false;
         connection.changes.add(false);
+        await adb
+            .prepareOnOpen(); // Foreground observation cannot retry startup.
         expect(adb.ready, isFalse);
         expect((await adb.offlineStatus()).pid, 5678);
         expect((await adb.offlineStatus()).uid, 2000);
@@ -141,6 +204,38 @@ void main() {
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
             .setMockMethodCallHandler(EmbeddedAdb.channel, null);
       }
+    },
+  );
+
+  test(
+    'failed startup discovers once and does not bootstrap or retry',
+    () async {
+      final connection = FakeConnection(identity)..alive = false;
+      final adb = EmbeddedAdb.forTesting(connection);
+      final calls = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(EmbeddedAdb.channel, (call) async {
+            calls.add(call.method);
+            return {
+              'localAddresses': ['192.0.2.1'],
+              'services': [],
+            };
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(EmbeddedAdb.channel, null),
+      );
+      await Future.wait([adb.prepareOnOpen(), adb.prepareOnOpen()]);
+      await adb.prepareOnOpen();
+      expect(calls, ['discoverConnect']);
+      expect(adb.startupFailed.value, isTrue);
+      expect(connection.opens, 0);
+      await adb.prepareOnForeground();
+      expect(calls, [
+        'discoverConnect',
+        'discoverConnect',
+      ], reason: 'Only a new opening may attempt preparation again');
+      await connection.changes.close();
     },
   );
 
