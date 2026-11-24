@@ -133,6 +133,8 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
       _operation = token;
       _message = null;
       _selected = null;
+      _downloaded = null;
+      _transferFailed = false;
       _results = [];
       _progress = null;
       _phase = 'Ricerca YouTube';

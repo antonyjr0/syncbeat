@@ -40,7 +40,10 @@ void main() {
           expect(adb.grants, 1);
           expect(button, findsOneWidget);
         } else {
-          expect(find.text('Collegamento automatico abilitato.'), findsWidgets);
+          expect(
+            find.text('Collegamento automatico abilitato.'),
+            findsOneWidget,
+          );
           expect(button, findsNothing);
         }
       },

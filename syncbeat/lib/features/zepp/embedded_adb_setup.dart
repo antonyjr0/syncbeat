@@ -52,7 +52,7 @@ class _EmbeddedAdbSetupState extends State<EmbeddedAdbSetup> {
       if (mounted) {
         setState(() {
           _automaticAuthorized = true;
-          _message = 'Collegamento automatico abilitato.';
+          _message = null;
         });
       }
     } catch (error) {

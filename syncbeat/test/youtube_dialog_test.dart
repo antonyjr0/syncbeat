@@ -241,6 +241,16 @@ void main() {
       await tester.pumpAndSettle();
       expect(download.calls, before + 1);
       expect(find.text('Aggiornamento non riuscito'), findsOneWidget);
+      download.fail = false;
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      expect(find.text('Invia all’orologio'), findsOneWidget);
+      final search = find.text('Cerca su YouTube');
+      await tester.ensureVisible(search);
+      await tester.tap(search);
+      await tester.pumpAndSettle();
+      expect(find.text('Invia all’orologio'), findsNothing);
+      expect(find.text('Apri file'), findsNothing);
       debugDefaultTargetPlatformOverride = null;
     },
   );

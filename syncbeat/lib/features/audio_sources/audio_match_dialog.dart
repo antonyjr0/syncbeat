@@ -397,12 +397,15 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
               SizedBox(height: 8),
               RadioGroup<AudioCandidate>(
                 groupValue: _selectedCandidate,
-                onChanged: (candidate) => setState(() {
-                  _selectedCandidate = candidate;
-                  _stagedFile = null;
-                  _watchMessage = null;
-                  _transferFailed = false;
-                }),
+                onChanged: (candidate) {
+                  if (_downloading || _searching) return;
+                  setState(() {
+                    _selectedCandidate = candidate;
+                    _stagedFile = null;
+                    _watchMessage = null;
+                    _transferFailed = false;
+                  });
+                },
                 child: Column(
                   children: [
                     for (final item in _result!.candidates)
@@ -526,6 +529,7 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
         borderRadius: BorderRadius.circular(8),
       ),
       child: RadioListTile<AudioCandidate>(
+        enabled: !_downloading && !_searching,
         value: candidate,
         title: Text(
           candidate.title,

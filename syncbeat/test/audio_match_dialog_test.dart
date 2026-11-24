@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -78,7 +79,7 @@ void main() {
       final watch = _WatchTransfer();
       final services = _services(
         temporaryDirectory,
-        [_jamendoTrack()],
+        [_jamendoTrack(id: '1'), _jamendoTrack(id: '2')],
         offlineUseAuthorized: true,
         downloader: completed,
         watchTransfer: watch,
@@ -89,13 +90,36 @@ void main() {
       await tester.tap(find.text('Cerca su Jamendo'));
       await tester.pumpAndSettle();
       expect(find.text('Invia all’orologio'), findsNothing);
+      final choices = find.byType(RadioListTile<AudioCandidate>);
+      await tester.ensureVisible(choices.first);
+      await tester.tap(choices.first);
+      await tester.pumpAndSettle();
       final download = find.text('Scarica MP3');
       await tester.tap(download);
       await tester.pumpAndSettle();
       expect(watch.files, isEmpty);
       final send = find.text('Invia all’orologio');
+      watch.pending = Completer<void>();
       await tester.ensureVisible(send);
       await tester.tap(send);
+      await tester.pump();
+      expect(
+        tester.widget<RadioListTile<AudioCandidate>>(choices.last).enabled,
+        isFalse,
+      );
+      await tester.ensureVisible(choices.last);
+      await tester.tap(choices.last);
+      await tester.pump();
+      expect(
+        tester
+            .widget<RadioGroup<AudioCandidate>>(
+              find.byType(RadioGroup<AudioCandidate>),
+            )
+            .groupValue
+            ?.id,
+        '1',
+      );
+      watch.pending!.complete();
       await tester.pumpAndSettle();
       expect(watch.files.single.path, '/actual/staging/returned-2.mp3');
       expect(watch.files.single.name, 'Returned title-2.mp3');
@@ -233,6 +257,7 @@ class _AudioServices {
 
 class _WatchTransfer extends ZeppDownloadTransfer {
   final files = <PublishedAudio>[];
+  Completer<void>? pending;
   @override
   Future<void> send(
     PublishedAudio file, {
@@ -242,6 +267,7 @@ class _WatchTransfer extends ZeppDownloadTransfer {
   }) async {
     files.add(file);
     onEvent(const ZeppEvent.status('Invio completato'));
+    await pending?.future;
   }
 }
 
