@@ -51,6 +51,9 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
         adbChannel = MethodChannel(messenger, "syncbeat/embedded_adb")
         adbChannel.setMethodCallHandler { call, result ->
             when (call.method) {
+                "wirelessDebugAuthorization" -> result.success(mapOf(
+                    "authorized" to (activity.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED),
+                    "primaryUser" to (android.os.Process.myUid() / 100000 == 0)))
                 "ensureWirelessDebug" -> {
                     try {
                         val preparation = WirelessDebugPreparation(object : WirelessDebugPreparation.Device {

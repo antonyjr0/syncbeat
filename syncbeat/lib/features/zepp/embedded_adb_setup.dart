@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'embedded_adb.dart';
+import 'zepp_adb_stream.dart';
 
 Future<void> showEmbeddedAdbSetup(BuildContext context) => showDialog<void>(
   context: context,
@@ -9,18 +10,63 @@ Future<void> showEmbeddedAdbSetup(BuildContext context) => showDialog<void>(
 );
 
 class EmbeddedAdbSetup extends StatefulWidget {
-  const EmbeddedAdbSetup({super.key});
+  const EmbeddedAdbSetup({super.key, this.adb});
+  final EmbeddedAdb? adb;
   @override
   State<EmbeddedAdbSetup> createState() => _EmbeddedAdbSetupState();
 }
 
 class _EmbeddedAdbSetupState extends State<EmbeddedAdbSetup> {
-  final _connectPort = TextEditingController(
-    text: EmbeddedAdb.instance.connectionPort?.toString(),
+  late final _adb = widget.adb ?? EmbeddedAdb.instance;
+  late final _connectPort = TextEditingController(
+    text: _adb.connectionPort?.toString(),
   );
   bool _busy = false;
   String? _message;
   bool _connectionError = false;
+  bool? _automaticAuthorized;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshAuthorization();
+  }
+
+  Future<void> _refreshAuthorization() async {
+    try {
+      final granted = await _adb.automaticActivationAuthorized();
+      if (mounted) setState(() => _automaticAuthorized = granted);
+    } catch (_) {
+      /* Keep the explicit action available; it verifies again. */
+    }
+  }
+
+  Future<void> _authorizeAutomatic() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _message = 'Abilitazione del collegamento automatico…';
+    });
+    try {
+      await _adb.authorizeAutomaticActivation(userApproved: true);
+      if (mounted) {
+        setState(() {
+          _automaticAuthorized = true;
+          _message = 'Collegamento automatico abilitato.';
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _message = error is ZeppBootstrapException
+              ? error.message
+              : 'Abilitazione non riuscita. Nessun nuovo tentativo automatico.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   Future<void> _run(bool pairing, {bool manual = false}) async {
     var connecting = !pairing;
@@ -32,17 +78,16 @@ class _EmbeddedAdbSetupState extends State<EmbeddedAdbSetup> {
     });
     try {
       if (pairing) {
-        await EmbeddedAdb.instance.pairFromNotification();
+        await _adb.pairFromNotification();
         connecting = true;
       }
       if (manual) {
-        await EmbeddedAdb.instance.connect(
-          EmbeddedAdb.validatePort(_connectPort.text),
-        );
+        await _adb.connect(EmbeddedAdb.validatePort(_connectPort.text));
       } else {
-        await EmbeddedAdb.instance.connectAutomatically();
+        await _adb.connectAutomatically();
       }
-      await EmbeddedAdb.instance.prepareForUse(alreadyConnected: true);
+      await _adb.prepareForUse(alreadyConnected: true);
+      await _refreshAuthorization();
       if (mounted) {
         setState(() {
           _connectionError = false;
@@ -137,6 +182,17 @@ class _EmbeddedAdbSetupState extends State<EmbeddedAdbSetup> {
                 onPressed: _busy ? null : () => _run(false, manual: true),
                 child: const Text('Collega con porta manuale'),
               ),
+            const SizedBox(height: 12),
+            if (_automaticAuthorized != true) ...[
+              const Text(
+                'Consente a SyncBeat di attivare il Debug wireless tramite un’autorizzazione alle impostazioni protette di Android.',
+              ),
+              FilledButton(
+                onPressed: _busy ? null : _authorizeAutomatic,
+                child: const Text('Abilita collegamento automatico'),
+              ),
+            ] else
+              const Text('Collegamento automatico abilitato.'),
             if (_busy) const LinearProgressIndicator(),
             if (_message != null) Text(_message!),
           ],

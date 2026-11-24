@@ -77,6 +77,90 @@ void main() {
     identity = AdbCrypto();
   });
 
+  for (final scenario in [
+    'success',
+    'success_eof',
+    'unconfirmed',
+    'denied',
+    'profile',
+    'already',
+    'no_consent',
+  ]) {
+    test('guided authorization: $scenario', () async {
+      final connection = FakeConnection(identity);
+      final adb = EmbeddedAdb.forTesting(connection);
+      var granted = scenario == 'already';
+      var queries = 0;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(EmbeddedAdb.channel, (call) async {
+            expect(call.method, 'wirelessDebugAuthorization');
+            queries++;
+            return {
+              'primaryUser': scenario != 'profile',
+              'authorized': granted,
+            };
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(EmbeddedAdb.channel, null),
+      );
+      connection.onOpen = (stream) {
+        stream.remoteId = 10;
+        stream.readyForWrite();
+        if (scenario.startsWith('success')) granted = true;
+        stream.addPayload(
+          Uint8List.fromList(
+            utf8.encode(
+              scenario == 'denied'
+                  ? 'Permission refused\n'
+                  : 'SYNCBEAT_DEBUG_AUTH_GRANTED_V1\r\n',
+            ),
+          ),
+        );
+        if (scenario == 'denied' || scenario == 'success_eof') {
+          scheduleMicrotask(stream.close);
+        }
+      };
+      if (scenario.startsWith('success')) {
+        await Future.wait([
+          adb.authorizeAutomaticActivation(userApproved: true),
+          adb.authorizeAutomaticActivation(userApproved: true),
+        ]);
+        expect(queries, 2);
+      } else if (scenario == 'already') {
+        await adb.authorizeAutomaticActivation(userApproved: true);
+      } else {
+        final expected = switch (scenario) {
+          'unconfirmed' => 'ADB_GRANT_NOT_CONFIRMED',
+          'profile' => 'ADB_GRANT_PROFILE',
+          'no_consent' => 'ADB_GRANT_CONSENT_REQUIRED',
+          _ => 'ADB_GRANT_FAILED',
+        };
+        await expectLater(
+          adb.authorizeAutomaticActivation(
+            userApproved: scenario != 'no_consent',
+          ),
+          throwsA(failureCode(expected)),
+        );
+      }
+      final shouldOpen = [
+        'success',
+        'success_eof',
+        'unconfirmed',
+        'denied',
+      ].contains(scenario);
+      expect(connection.opens, shouldOpen ? 1 : 0);
+      if (shouldOpen) {
+        expect(
+          connection.destinations.single,
+          'shell:pm grant --user 0 com.example.syncbeat android.permission.WRITE_SECURE_SETTINGS && echo SYNCBEAT_DEBUG_AUTH_GRANTED_V1',
+        );
+      }
+      if (scenario == 'no_consent') expect(queries, 0);
+      await connection.changes.close();
+    });
+  }
+
   for (final activation in [
     'authorization_required',
     'already_enabled',

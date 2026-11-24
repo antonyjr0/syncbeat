@@ -47,6 +47,7 @@ class EmbeddedAdb {
   Future<void>? _automaticConnection;
   Future<void>? _startup;
   Future<void>? _openingPreparation;
+  Future<void>? _grantOperation;
   AppLifecycleListener? _appLifecycle;
   bool _wasInBackground = false;
   final startupStatus = ValueNotifier<String?>(null);
@@ -55,6 +56,82 @@ class EmbeddedAdb {
   bool get ready =>
       _connection?.connected == true && _connection?.tlsEnabled == true;
   int? get connectionPort => _port;
+
+  Future<bool> automaticActivationAuthorized() async {
+    final state = await channel.invokeMapMethod<String, Object?>(
+      'wirelessDebugAuthorization',
+    );
+    if (state?['primaryUser'] != true) {
+      throw const ZeppBootstrapException(
+        'ADB_GRANT_PROFILE',
+        'Il collegamento automatico richiede il profilo principale di Android.',
+      );
+    }
+    return state?['authorized'] == true;
+  }
+
+  /// Invoked only by the explicit setup button, never by startup/background code.
+  Future<void> authorizeAutomaticActivation({
+    required bool userApproved,
+  }) async {
+    if (!userApproved) {
+      throw const ZeppBootstrapException(
+        'ADB_GRANT_CONSENT_REQUIRED',
+        'Premi Abilita collegamento automatico per autorizzare questa funzione.',
+      );
+    }
+    final pending = _grantOperation;
+    if (pending != null) return pending;
+    final operation = _grantAutomaticActivation();
+    _grantOperation = operation;
+    try {
+      await operation;
+    } finally {
+      if (identical(_grantOperation, operation)) _grantOperation = null;
+    }
+  }
+
+  Future<void> _grantAutomaticActivation() async {
+    if (_active) {
+      throw const ZeppBootstrapException(
+        'ADB_GRANT_BUSY',
+        'Attendi la fine del trasferimento e del ripristino di Zepp.',
+      );
+    }
+    if (await automaticActivationAuthorized()) return;
+    await connectAutomatically();
+    zeppDiagnostic('ADB_GRANT_REQUEST');
+    // Fixed package, user and permission. No caller-supplied shell arguments.
+    final stream = await ZeppAdbStream.open(
+      _connection!,
+      ++_nextStreamId,
+      'shell:pm grant --user 0 com.example.syncbeat android.permission.WRITE_SECURE_SETTINGS && echo SYNCBEAT_DEBUG_AUTH_GRANTED_V1',
+    );
+    try {
+      await stream.onPayload
+          .cast<List<int>>()
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .firstWhere((line) => line == 'SYNCBEAT_DEBUG_AUTH_GRANTED_V1')
+          .timeout(const Duration(seconds: 10));
+    } catch (_) {
+      zeppDiagnostic('ADB_GRANT_ERROR');
+      throw const ZeppBootstrapException(
+        'ADB_GRANT_FAILED',
+        'Autorizzazione non confermata. Controlla il Debug wireless; nessun nuovo tentativo automatico.',
+      );
+    } finally {
+      await stream.close();
+    }
+    if (!await automaticActivationAuthorized()) {
+      zeppDiagnostic('ADB_GRANT_ERROR');
+      throw const ZeppBootstrapException(
+        'ADB_GRANT_NOT_CONFIRMED',
+        'Android non ha concesso l’autorizzazione. Il Debug wireless resta gestibile dalle impostazioni.',
+      );
+    }
+    zeppDiagnostic('ADB_GRANT_VERIFIED');
+  }
 
   void register() {
     channel.setMethodCallHandler((call) async {

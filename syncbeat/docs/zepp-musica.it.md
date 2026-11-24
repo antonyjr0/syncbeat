@@ -336,3 +336,11 @@ Il 24 novembre 2026, con consenso esplicito dell’utente, il privilegio è stat
 Il privilegio rimane concesso dopo i normali riavvii; non occorre ripetere il comando a ogni apertura. Il telefono non è stato riavviato durante questa prova: è stata verificata l’accensione del debug da un avvio a freddo dell’app. Dopo un riavvio l’app deve essere aperta con Wi-Fi collegato per eseguire la preparazione. Il privilegio può essere revocato dal PC con `adb shell pm revoke --user 0 com.example.syncbeat android.permission.WRITE_SECURE_SETTINGS`; in quel caso il debug dovrà essere acceso dalle impostazioni Android.
 
 Il privilegio consente tecnicamente di modificare impostazioni protette più ampie di quella usata dal nostro codice. Va quindi mantenuto solo per una build attendibile di SyncBeat. Il Debug wireless usa autenticazione e TLS, ma quando è attivo i computer precedentemente autorizzati possono collegarsi. L’accensione del debug prepara l’helper; l’invio musicale senza Wi-Fi richiede ancora gli incrementi successivi sul canale locale.
+
+## Concessione guidata dal telefono, 24 novembre 2026
+
+In **Impostazioni collegamento**, disponibile dalla home, la configurazione propone **Abilita collegamento automatico** con il testo: «Consente a SyncBeat di attivare il Debug wireless tramite un’autorizzazione alle impostazioni protette di Android.» Il tocco richiede la concessione attraverso la connessione ADB già autorizzata di SyncBeat, senza un altro popup o comandi da digitare.
+
+La prima volta restano necessari Wi-Fi, Debug wireless acceso e abbinamento Android dalla notifica. La ricerca della porta è automatica. Abbinamento, collegamento e semplice apertura dell’app non concedono da soli il privilegio: occorre premere **Abilita collegamento automatico**. Se il privilegio è già concesso, la configurazione lo indica e non lo richiede di nuovo.
+
+Il comando eseguito dall’app riguarda soltanto SyncBeat, il profilo principale e `WRITE_SECURE_SETTINGS`. L’app controlla lo stato effettivo Android prima di mostrare l’abilitazione riuscita. In caso di errore si ferma senza ripetere il comando automaticamente. La prova dopo la revoca del privilegio esistente è descritta nel resoconto.

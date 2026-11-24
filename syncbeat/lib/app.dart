@@ -289,12 +289,15 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(message),
-                                if (EmbeddedAdb.instance.startupFailed.value)
-                                  TextButton(
-                                    onPressed: () =>
-                                        showEmbeddedAdbSetup(context),
-                                    child: const Text('Configura collegamento'),
+                                TextButton(
+                                  onPressed: () =>
+                                      showEmbeddedAdbSetup(context),
+                                  child: Text(
+                                    EmbeddedAdb.instance.startupFailed.value
+                                        ? 'Configura collegamento'
+                                        : 'Impostazioni collegamento',
                                   ),
+                                ),
                               ],
                             ),
                           ),
