@@ -8,6 +8,9 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothSocket
 import android.content.pm.PackageManager
 import android.os.Build
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.provider.Settings
 import android.os.SystemClock
 import android.util.Log
 import com.example.syncbeat.zepp.ZeppSession
@@ -48,6 +51,25 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
         adbChannel = MethodChannel(messenger, "syncbeat/embedded_adb")
         adbChannel.setMethodCallHandler { call, result ->
             when (call.method) {
+                "ensureWirelessDebug" -> {
+                    try {
+                        val preparation = WirelessDebugPreparation(object : WirelessDebugPreparation.Device {
+                            override fun wifiConnected(): Boolean {
+                                val connectivity = activity.getSystemService(ConnectivityManager::class.java)
+                                @Suppress("DEPRECATION")
+                                return connectivity.allNetworks.any {
+                                    connectivity.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+                                }
+                            }
+                            override fun mayWriteSecureSettings() = activity.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
+                            override fun enabled() = Settings.Global.getInt(activity.contentResolver, "adb_wifi_enabled", 0) == 1
+                            override fun enable() = Settings.Global.putInt(activity.contentResolver, "adb_wifi_enabled", 1)
+                        })
+                        result.success(preparation.prepare())
+                    } catch (_: Exception) {
+                        result.error("ADB_WIFI_ENABLE_FAILED", "Attivazione Debug wireless non riuscita. Usa le impostazioni Android.", null)
+                    }
+                }
                 "discoverConnect" -> adbDiscovery.discover(result)
                 "pairFromNotification" -> adbPairing.start(result)
                 "cancelPairingNotification" -> { adbPairing.cancel(); result.success(null) }

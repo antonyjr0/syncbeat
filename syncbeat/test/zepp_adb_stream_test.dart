@@ -77,6 +77,57 @@ void main() {
     identity = AdbCrypto();
   });
 
+  for (final activation in [
+    'authorization_required',
+    'already_enabled',
+    'enable_requested',
+    'no_wifi',
+  ]) {
+    test(
+      'activation state $activation still permits at most one discovery/connection',
+      () async {
+        final connection = FakeConnection(identity)..alive = false;
+        final adb = RecordingEmbedded(connection);
+        final calls = <String>[];
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(EmbeddedAdb.channel, (call) async {
+              calls.add(call.method);
+              if (call.method == 'ensureWirelessDebug') return activation;
+              return {
+                'localAddresses': ['192.0.2.1'],
+                'services': [
+                  {
+                    'name': 'adb-self-connect',
+                    'type': '_adb-tls-connect._tcp',
+                    'addresses': ['192.0.2.1'],
+                    'port': 43210,
+                  },
+                ],
+              };
+            });
+        addTearDown(
+          () => TestDefaultBinaryMessengerBinding
+              .instance
+              .defaultBinaryMessenger
+              .setMockMethodCallHandler(EmbeddedAdb.channel, null),
+        );
+        if (activation == 'no_wifi') {
+          await expectLater(
+            adb.connectAutomatically(),
+            throwsA(failureCode('ADB_WIFI_REQUIRED')),
+          );
+          expect(calls, ['ensureWirelessDebug']);
+          expect(adb.connectedPorts, isEmpty);
+        } else {
+          await adb.connectAutomatically();
+          expect(calls, ['ensureWirelessDebug', 'discoverConnect']);
+          expect(adb.connectedPorts, [43210]);
+        }
+        await connection.changes.close();
+      },
+    );
+  }
+
   for (final refuse in [false, true]) {
     test(
       'automatic discovery connects once, without a saved-port fallback; refusal=$refuse',
@@ -86,6 +137,9 @@ void main() {
         var discoveries = 0;
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
             .setMockMethodCallHandler(EmbeddedAdb.channel, (call) async {
+              if (call.method == 'ensureWirelessDebug') {
+                return 'authorization_required';
+              }
               expect(call.method, 'discoverConnect');
               discoveries++;
               return {
@@ -216,6 +270,9 @@ void main() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(EmbeddedAdb.channel, (call) async {
             calls.add(call.method);
+            if (call.method == 'ensureWirelessDebug') {
+              return 'authorization_required';
+            }
             return {
               'localAddresses': ['192.0.2.1'],
               'services': [],
@@ -227,12 +284,14 @@ void main() {
       );
       await Future.wait([adb.prepareOnOpen(), adb.prepareOnOpen()]);
       await adb.prepareOnOpen();
-      expect(calls, ['discoverConnect']);
+      expect(calls, ['ensureWirelessDebug', 'discoverConnect']);
       expect(adb.startupFailed.value, isTrue);
       expect(connection.opens, 0);
       await adb.prepareOnForeground();
       expect(calls, [
+        'ensureWirelessDebug',
         'discoverConnect',
+        'ensureWirelessDebug',
         'discoverConnect',
       ], reason: 'Only a new opening may attempt preparation again');
       await connection.changes.close();

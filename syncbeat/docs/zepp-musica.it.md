@@ -324,3 +324,11 @@ Se manca la configurazione dell’orologio, alla pressione di **Invia all’orol
 Un errore di invio lascia il file salvato e mostra **Invia all’orologio** per un nuovo tentativo esplicito, senza riscaricare il file. Non partono tentativi automatici aggiuntivi né invii in coda. Un ripristino Zepp pendente blocca il nuovo invio e mostra le indicazioni di recupero. Chiudere il popup o annullare l’operazione interrompe l’invio usando il percorso di annullamento e ripristino esistente.
 
 Questo incremento usa ancora il flusso di sospensione e ripristino tramite Wi-Fi/ADB. Il canale locale B1 continua a esporre soltanto lo stato: l’invio senza Wi-Fi resta da implementare e verificare nei checkpoint successivi. **MP3 locali** conserva il percorso manuale già esistente. Le autorizzazioni al download e all’uso offline delle fonti mantengono le verifiche precedenti.
+
+## Attivazione opzionale del Debug wireless dall’app, 24 novembre 2026
+
+È stato predisposto un percorso opzionale per richiedere l’attivazione del Debug wireless quando SyncBeat prepara il collegamento. Prima controlla che il telefono sia collegato al Wi-Fi e che l’app abbia `WRITE_SECURE_SETTINGS`. Questo privilegio, più ampio dei normali permessi, richiede una concessione specifica una volta tramite ADB: non è il normale popup delle autorizzazioni Android. Non viene concesso dalla sola installazione della build.
+
+Con Wi-Fi e privilegio presenti, se il Debug wireless è spento, il codice richiede una sola attivazione della specifica impostazione `adb_wifi_enabled`. Continua poi con discovery e collegamento TLS: la sola scrittura dell’impostazione non viene considerata una prova di servizio pronto. Se è già acceso, non lo riscrive. Senza privilegio il codice non legge né modifica impostazioni protette e resta disponibile la preparazione verificata con Debug wireless acceso manualmente.
+
+Il percorso di accensione richiede ancora la concessione concordata e la verifica su HyperOS. Le eventuali conferme Android sulla rete e l’abbinamento iniziale restano applicabili. La preparazione non invia musica e non sospende i permessi Zepp.

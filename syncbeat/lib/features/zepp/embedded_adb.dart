@@ -245,8 +245,29 @@ class EmbeddedAdb {
   }
 
   Future<void> _discoverAndConnect() async {
-    zeppDiagnostic('ADB_DISCOVERY_START');
     try {
+      final activation = await channel
+          .invokeMethod<String>('ensureWirelessDebug')
+          .timeout(const Duration(seconds: 5));
+      switch (activation) {
+        case 'no_wifi':
+          throw const ZeppBootstrapException(
+            'ADB_WIFI_REQUIRED',
+            'Collega il telefono a una rete Wi-Fi per preparare il servizio.',
+          );
+        case 'authorization_required':
+          zeppDiagnostic('ADB_WIFI_MANUAL_ACTIVATION');
+        case 'already_enabled':
+          zeppDiagnostic('ADB_WIFI_ALREADY_ENABLED');
+        case 'enable_requested':
+          zeppDiagnostic('ADB_WIFI_ENABLE_REQUESTED');
+        default:
+          throw const ZeppBootstrapException(
+            'ADB_WIFI_STATE_INVALID',
+            'Stato Debug wireless non disponibile.',
+          );
+      }
+      zeppDiagnostic('ADB_DISCOVERY_START');
       final snapshot = await channel
           .invokeMapMethod<Object?, Object?>('discoverConnect')
           .timeout(const Duration(seconds: 12));
@@ -261,7 +282,8 @@ class EmbeddedAdb {
           : error is PlatformException
           ? error.code
           : null;
-      if (code != null && RegExp(r'^ADB_DISCOVERY_[A-Z_]+$').hasMatch(code)) {
+      if (code != null &&
+          RegExp(r'^ADB_(DISCOVERY|WIFI)_[A-Z_]+$').hasMatch(code)) {
         zeppDiagnostic(code);
       }
       rethrow;
