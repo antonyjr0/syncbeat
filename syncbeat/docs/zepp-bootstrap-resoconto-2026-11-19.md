@@ -239,3 +239,23 @@ Progetto SyncBeat, estensione richiesta dall’utente al punto 4b: attivare il D
 Verifiche locali: **191 test Flutter e 56 test JVM superati**. I nuovi test verificano i blocchi in assenza di Wi-Fi o privilegio, nessuna scrittura su servizio già abilitato, una sola richiesta di attivazione, errore senza retry su scrittura rifiutata e prosecuzione con un solo tentativo di discovery/connessione. La verifica effettiva dell’accensione su HyperOS resta pendente.
 
 L’analisi statica è pulita e l’APK release è stato compilato e installato. Il privilegio speciale non è stato concesso. L’apertura della nuova build ha registrato `ADB_WIFI_MANUAL_ACTIVATION` alle 12:49:24.266 e `APP_PREPARATION_READY` alle 12:49:29.760, con una sola selezione locale e un solo bootstrap. Questo conferma il funzionamento senza autorizzazione aggiuntiva quando il Debug wireless è già attivo, e il mancato avvio della scrittura protetta. I permessi Zepp sono rimasti invariati. È stato richiesto l’accordo specifico per la concessione e per la prova spento→acceso dall’app; l’esito di quella prova non è ancora disponibile.
+
+## Modifiche apportate, 24 novembre 2026: concessione e prova di accensione riuscita
+
+Progetto SyncBeat, estensione del punto 4b autorizzata dall’utente con richiesta esplicita di eseguire la concessione. È stato eseguito `adb shell pm grant --user 0 com.example.syncbeat android.permission.WRITE_SECURE_SETTINGS`, senza errori. `dumpsys package` ha confermato `granted=true`.
+
+**Esito: Debug wireless acceso dall’app e preparazione riuscita.** Prima dell’avvio `adb_wifi_enabled` risultava già `0`, con Wi-Fi collegato. Non è stato necessario spegnerlo dal PC. SyncBeat è stata arrestata e riaperta per osservare un avvio a freddo dell’app, senza riavviare il telefono.
+
+| Ora nel logcat del telefono | Evento |
+| --- | --- |
+| 14:16:44.134 | `ADB_WIFI_ENABLE_REQUESTED`: l’app richiede l’attivazione. |
+| 14:16:44.134 | Inizio della ricerca NSD. |
+| 14:16:49.171 | Selezione di un solo candidato locale valido. |
+| 14:16:49.233 | Connessione ADB autenticata. |
+| 14:16:49.883 | `READY` ricevuto e chiusura della shell di bootstrap. |
+| 14:16:49.891 | Autenticazione del canale locale confermata. |
+| 14:16:49.893 | `APP_PREPARATION_READY`, dopo lo stato del servizio PID 19195. |
+
+La lettura indipendente finale di `adb_wifi_enabled` ha restituito `1`. Dal primo evento a pronto: 5.759 ms. Una richiesta di attivazione, una ricerca e un tentativo di collegamento. Nessun `BEGIN_WRITE` o `RESTORE_WRITE`; permessi Zepp e flag coincidenti con la baseline e registro contenente soltanto `lease.lock`. Evidenze locali in `tools/zepp-transfer/debug-activation/`, escluse da Git.
+
+La persistenza della concessione attraverso i riavvii è il comportamento dei permessi di sviluppo Android; il riavvio del telefono non è stato effettuato in questa prova. La riattivazione richiede l’apertura dell’app con Wi-Fi collegato. Il privilegio è più ampio della sola impostazione interessata ed è revocabile con `pm revoke`; il codice attuale espone soltanto l’attivazione del Debug wireless. Il trasporto ADB rimane autenticato tramite pairing/TLS. Questa prova non abilita né dimostra l’invio MP3 senza Wi-Fi, che resta subordinato al recupero del punto 5.4 e ai checkpoint B2/B3.
