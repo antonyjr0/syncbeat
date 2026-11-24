@@ -208,3 +208,22 @@ L’utente ha attivato Wi-Fi e Debug wireless e ha concordato la verifica della 
 La prima diagnostica non esponeva il motivo specifico della mancata selezione. È stata aggiunta la normalizzazione dei tipi NSD e una diagnostica limitata a codici fissi e contatori di servizi, indirizzi locali e candidati, senza nomi servizio o identificatori. La causa iniziale non è quindi considerata dimostrata dalla sola prima traccia; la verifica della build aggiornata deve stabilire l’esito reale.
 
 La build release aggiornata è compilata in `build/app/outputs/flutter-apk/app-release.apk`. Il collegamento USB si è interrotto prima della sua installazione; l’utente è stato avvisato ed è stato richiesto di ricollegare il telefono. L’ultima versione installata ha già l’invio esplicito e la prima implementazione della preparazione all’apertura, ma non l’ultima normalizzazione/diagnostica NSD. Nessun esito positivo A2 viene dichiarato finché la prova della build aggiornata non è conclusa.
+
+## Modifiche apportate, 24 novembre 2026: verifica della preparazione automatica A2
+
+Progetto SyncBeat, punti 4b e 5.5/B1. L’utente ha richiesto installazione e verifica con Wi-Fi e Debug wireless già attivi, specificando che porta e dati di connessione devono essere acquisiti dall’app. È stata installata via USB la release del commit `f0f4236`, esito `Success`, e avviata SyncBeat senza alcun inserimento di porta o tap sui comandi di preparazione.
+
+**Esito: preparazione automatica riuscita sul telefono HyperOS.** NSD ha risolto due servizi e rilevato sei indirizzi locali. Il filtro Dart ha individuato un solo candidato valido per questo telefono. È seguita una sola connessione TLS, un solo bootstrap del canale diretto, una sola autenticazione e una risposta di stato del processo shell PID 27993, UID 2000.
+
+| Ora nel logcat del telefono | Evento |
+| --- | --- |
+| 12:40:34.862 | Avvio della ricerca automatica. |
+| 12:40:40.135 | Snapshot NSD: due servizi risolti. |
+| 12:40:40.138 | Un solo candidato locale valido. |
+| 12:40:40.221 | Collegamento ADB autenticato. |
+| 12:40:40.222 | Avvio del bootstrap diretto. |
+| 12:40:40.711 | `READY` ricevuto e chiusura del bootstrap. |
+| 12:40:40.717 | Autenticazione locale confermata. |
+| 12:40:40.718 | `DIRECT_STATUS_OK` e `APP_PREPARATION_READY`. |
+
+Dal primo evento al servizio pronto sono trascorsi 5.856 ms. I log contengono una ricerca e una autenticazione, nessun `BEGIN_WRITE` e nessun `RESTORE_WRITE`. I tre permessi Zepp e i relativi flag coincidono con la baseline; il registro contiene soltanto `lease.lock`. Le evidenze locali sono in `tools/zepp-transfer/auto-open/`, escluse da Git. La prova dimostra scoperta e preparazione, non un invio musicale completo né l’accensione automatica del Debug wireless spento.
