@@ -2,11 +2,15 @@ import 'dart:async';
 
 import 'zepp_diagnostics.dart';
 
-/// Serial request/reply channel used by the embedded ADB helper.
+/// Serial request/reply channel used by the local helpers.
 class ZeppAdbRequests {
-  ZeppAdbRequests(this.write);
+  ZeppAdbRequests(
+    this.write, {
+    this.replyTimeout = const Duration(seconds: 25),
+  });
 
   final Future<bool> Function(String) write;
+  final Duration replyTimeout;
   Future<void> _queue = Future.value();
   Completer<String>? _reply;
   String? _replyId;
@@ -42,9 +46,7 @@ class ZeppAdbRequests {
         ).timeout(const Duration(seconds: 5))) {
           throw StateError('Servizio permessi non disponibile.');
         }
-        final response = await reply.future.timeout(
-          const Duration(seconds: 25),
-        );
+        final response = await reply.future.timeout(replyTimeout);
         if (response != 'OK' &&
             !(command == 'STATUS' && response.startsWith('STATUS:'))) {
           throw StateError(

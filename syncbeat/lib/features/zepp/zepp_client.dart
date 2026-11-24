@@ -1,6 +1,8 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'embedded_adb.dart';
+import 'zepp_direct_status.dart';
+import 'zepp_adb_stream.dart';
 
 /// Un orologio Bluetooth gia' abbinato al telefono.
 class ZeppDevice {
@@ -100,6 +102,11 @@ class ZeppClient {
   Future<void> forgetKey(ZeppDevice device) =>
       _storage.delete(key: _storageKey(device));
 
+  Future<String?> preferredDownloadDevice() =>
+      _storage.read(key: 'zepp_download_watch_v1');
+  Future<void> rememberDownloadDevice(ZeppDevice device) =>
+      _storage.write(key: 'zepp_download_watch_v1', value: device.address);
+
   Future<List<String>> probeParallelBle(ZeppDevice device) async {
     try {
       return await _channel.invokeListMethod<String>('probeBle', {
@@ -139,6 +146,16 @@ class ZeppClient {
       _channel.invokeMethod<void>('setZeppCoordination', {'enabled': enabled});
 
   Future<void> prepareZeppHelper() => _coordinationAction('prepareZeppHelper');
+
+  Future<ZeppDirectStatus> offlineHelperStatus({bool prepare = false}) async {
+    try {
+      return prepare
+          ? await EmbeddedAdb.instance.prepareOfflineStatus()
+          : await EmbeddedAdb.instance.offlineStatus();
+    } on ZeppBootstrapException catch (error) {
+      throw ZeppException(error.message);
+    }
+  }
 
   Future<void> restoreZeppPermissions() =>
       _coordinationAction('restoreZeppPermissions');

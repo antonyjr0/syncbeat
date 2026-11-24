@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'embedded_adb.dart';
+import 'zepp_adb_stream.dart';
 
 Future<void> showEmbeddedAdbSetup(BuildContext context) => showDialog<void>(
   context: context,
@@ -9,19 +10,66 @@ Future<void> showEmbeddedAdbSetup(BuildContext context) => showDialog<void>(
 );
 
 class EmbeddedAdbSetup extends StatefulWidget {
-  const EmbeddedAdbSetup({super.key});
+  const EmbeddedAdbSetup({super.key, this.adb});
+  final EmbeddedAdb? adb;
   @override
   State<EmbeddedAdbSetup> createState() => _EmbeddedAdbSetupState();
 }
 
 class _EmbeddedAdbSetupState extends State<EmbeddedAdbSetup> {
-  final _connectPort = TextEditingController(
-    text: EmbeddedAdb.instance.connectionPort?.toString(),
+  late final _adb = widget.adb ?? EmbeddedAdb.instance;
+  late final _connectPort = TextEditingController(
+    text: _adb.connectionPort?.toString(),
   );
   bool _busy = false;
   String? _message;
+  bool _connectionError = false;
+  bool? _automaticAuthorized;
 
-  Future<void> _run(bool pairing) async {
+  @override
+  void initState() {
+    super.initState();
+    _refreshAuthorization();
+  }
+
+  Future<void> _refreshAuthorization() async {
+    try {
+      final granted = await _adb.automaticActivationAuthorized();
+      if (mounted) setState(() => _automaticAuthorized = granted);
+    } catch (_) {
+      /* Keep the explicit action available; it verifies again. */
+    }
+  }
+
+  Future<void> _authorizeAutomatic() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _message = 'Abilitazione del collegamento automatico…';
+    });
+    try {
+      await _adb.authorizeAutomaticActivation(userApproved: true);
+      if (mounted) {
+        setState(() {
+          _automaticAuthorized = true;
+          _message = null;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _message = error is ZeppBootstrapException
+              ? error.message
+              : 'Abilitazione non riuscita. Nessun nuovo tentativo automatico.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _run(bool pairing, {bool manual = false}) async {
+    var connecting = !pairing;
     setState(() {
       _busy = true;
       _message = pairing
@@ -30,30 +78,38 @@ class _EmbeddedAdbSetupState extends State<EmbeddedAdbSetup> {
     });
     try {
       if (pairing) {
-        await EmbeddedAdb.instance.pairFromNotification();
-      } else {
-        await EmbeddedAdb.instance.connect(
-          EmbeddedAdb.validatePort(_connectPort.text),
-        );
+        await _adb.pairFromNotification();
+        connecting = true;
       }
+      if (manual) {
+        await _adb.connect(EmbeddedAdb.validatePort(_connectPort.text));
+      } else {
+        await _adb.connectAutomatically();
+      }
+      await _adb.prepareForUse(alreadyConnected: true);
+      await _refreshAuthorization();
       if (mounted) {
-        setState(
-          () => _message = pairing
-              ? 'Abbinamento riuscito. Inserisci ora la porta principale di Debug wireless e premi Collega.'
-              : 'ADB collegato in SyncBeat. Puoi chiudere e attivare Gestisci automaticamente Zepp.',
-        );
+        setState(() {
+          _connectionError = false;
+          _message =
+              'Collegamento autorizzato e pronto in SyncBeat. Puoi chiudere questa finestra.';
+        });
       }
     } on PlatformException catch (error) {
       if (mounted) {
-        setState(() => _message = error.message ?? 'Operazione non riuscita.');
+        setState(() {
+          _connectionError = connecting;
+          _message = error.message ?? 'Operazione non riuscita.';
+        });
       }
     } catch (_) {
       if (mounted) {
-        setState(
-          () => _message = pairing
+        setState(() {
+          _connectionError = connecting;
+          _message = !connecting
               ? 'Abbinamento non riuscito. Riprova con un nuovo codice.'
-              : 'Connessione non riuscita. Usa la porta della pagina principale Debug wireless, non quella di abbinamento.',
-        );
+              : 'Connessione automatica non riuscita. Controlla Wi-Fi e Debug wireless. Puoi usare la porta manuale come recupero.';
+        });
       }
     } finally {
       if (mounted) {
@@ -86,7 +142,9 @@ class _EmbeddedAdbSetupState extends State<EmbeddedAdbSetup> {
                   ? null
                   : () async {
                       try {
-                        await EmbeddedAdb.channel.invokeMethod<void>('settings');
+                        await EmbeddedAdb.channel.invokeMethod<void>(
+                          'settings',
+                        );
                       } on PlatformException catch (error) {
                         if (mounted) setState(() => _message = error.message);
                       }
@@ -102,20 +160,39 @@ class _EmbeddedAdbSetupState extends State<EmbeddedAdbSetup> {
             ),
             const SizedBox(height: 12),
             const Text(
-              'Dopo l’abbinamento, torna alla pagina principale Debug wireless. La porta di connessione è diversa e può cambiare dopo un riavvio.',
+              'La porta di connessione viene individuata automaticamente. '
+              'Dopo il primo abbinamento l’app prepara il collegamento a ogni apertura. '
+              'Android può richiedere di riattivare Debug wireless dopo un riavvio.',
             ),
-            TextField(
-              controller: _connectPort,
-              enabled: !_busy,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Porta di connessione',
+            if (_connectionError)
+              TextField(
+                controller: _connectPort,
+                enabled: !_busy,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Porta di connessione',
+                ),
               ),
-            ),
             FilledButton(
               onPressed: _busy ? null : () => _run(false),
-              child: const Text('Collega'),
+              child: const Text('Collega automaticamente'),
             ),
+            if (_connectionError)
+              TextButton(
+                onPressed: _busy ? null : () => _run(false, manual: true),
+                child: const Text('Collega con porta manuale'),
+              ),
+            const SizedBox(height: 12),
+            if (_automaticAuthorized != true) ...[
+              const Text(
+                'Consente a SyncBeat di attivare il Debug wireless tramite un’autorizzazione alle impostazioni protette di Android.',
+              ),
+              FilledButton(
+                onPressed: _busy ? null : _authorizeAutomatic,
+                child: const Text('Abilita collegamento automatico'),
+              ),
+            ] else
+              const Text('Collegamento automatico abilitato.'),
             if (_busy) const LinearProgressIndicator(),
             if (_message != null) Text(_message!),
           ],

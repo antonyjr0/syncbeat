@@ -4,13 +4,15 @@ import 'dart:isolate';
 import 'dart:math';
 
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_adb/flutter_adb.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'zepp_adb_requests.dart';
 import 'zepp_adb_stream.dart';
 import 'zepp_diagnostics.dart';
+import 'zepp_direct_status.dart';
+import 'adb_connect_discovery.dart';
 
 Map<String, String> _generateAdbIdentity() =>
     AdbCrypto(adbKeyName: 'SyncBeat@self').exportKeyPairForStorage();
@@ -32,6 +34,8 @@ class EmbeddedAdb {
   int _nextStreamId = 0;
   int _connectionGeneration = 0;
   int _bootstrapAttempt = 0;
+  ZeppDirectStatusSession? _directStatus;
+  Future<ZeppDirectStatusSession>? _directPreparation;
   StreamSubscription<String>? _subscription;
   late final _requests = ZeppAdbRequests((line) async {
     final stream = _helper;
@@ -40,10 +44,94 @@ class EmbeddedAdb {
   Timer? _heartbeat;
   bool _active = false;
   int? _port;
+  Future<void>? _automaticConnection;
+  Future<void>? _startup;
+  Future<void>? _openingPreparation;
+  Future<void>? _grantOperation;
+  AppLifecycleListener? _appLifecycle;
+  bool _wasInBackground = false;
+  final startupStatus = ValueNotifier<String?>(null);
+  final startupFailed = ValueNotifier<bool>(false);
 
   bool get ready =>
       _connection?.connected == true && _connection?.tlsEnabled == true;
   int? get connectionPort => _port;
+
+  Future<bool> automaticActivationAuthorized() async {
+    final state = await channel.invokeMapMethod<String, Object?>(
+      'wirelessDebugAuthorization',
+    );
+    if (state?['primaryUser'] != true) {
+      throw const ZeppBootstrapException(
+        'ADB_GRANT_PROFILE',
+        'Il collegamento automatico richiede il profilo principale di Android.',
+      );
+    }
+    return state?['authorized'] == true;
+  }
+
+  /// Invoked only by the explicit setup button, never by startup/background code.
+  Future<void> authorizeAutomaticActivation({
+    required bool userApproved,
+  }) async {
+    if (!userApproved) {
+      throw const ZeppBootstrapException(
+        'ADB_GRANT_CONSENT_REQUIRED',
+        'Premi Abilita collegamento automatico per autorizzare questa funzione.',
+      );
+    }
+    final pending = _grantOperation;
+    if (pending != null) return pending;
+    final operation = _grantAutomaticActivation();
+    _grantOperation = operation;
+    try {
+      await operation;
+    } finally {
+      if (identical(_grantOperation, operation)) _grantOperation = null;
+    }
+  }
+
+  Future<void> _grantAutomaticActivation() async {
+    if (_active) {
+      throw const ZeppBootstrapException(
+        'ADB_GRANT_BUSY',
+        'Attendi la fine del trasferimento e del ripristino di Zepp.',
+      );
+    }
+    if (await automaticActivationAuthorized()) return;
+    await connectAutomatically();
+    zeppDiagnostic('ADB_GRANT_REQUEST');
+    // Fixed package, user and permission. No caller-supplied shell arguments.
+    final stream = await ZeppAdbStream.open(
+      _connection!,
+      ++_nextStreamId,
+      'shell:pm grant --user 0 com.example.syncbeat android.permission.WRITE_SECURE_SETTINGS && echo SYNCBEAT_DEBUG_AUTH_GRANTED_V1',
+    );
+    try {
+      await stream.onPayload
+          .cast<List<int>>()
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .firstWhere((line) => line == 'SYNCBEAT_DEBUG_AUTH_GRANTED_V1')
+          .timeout(const Duration(seconds: 10));
+    } catch (_) {
+      zeppDiagnostic('ADB_GRANT_ERROR');
+      throw const ZeppBootstrapException(
+        'ADB_GRANT_FAILED',
+        'Autorizzazione non confermata. Controlla il Debug wireless; nessun nuovo tentativo automatico.',
+      );
+    } finally {
+      await stream.close();
+    }
+    if (!await automaticActivationAuthorized()) {
+      zeppDiagnostic('ADB_GRANT_ERROR');
+      throw const ZeppBootstrapException(
+        'ADB_GRANT_NOT_CONFIRMED',
+        'Android non ha concesso l’autorizzazione. Il Debug wireless resta gestibile dalle impostazioni.',
+      );
+    }
+    zeppDiagnostic('ADB_GRANT_VERIFIED');
+  }
 
   void register() {
     channel.setMethodCallHandler((call) async {
@@ -209,14 +297,226 @@ class EmbeddedAdb {
 
   Future<bool> reconnect() async {
     if (ready) return true;
-    final saved = await _storage.read(key: 'embedded_adb_port_v1');
-    if (saved == null) return false;
     try {
-      await connect(validatePort(saved));
+      await connectAutomatically();
       return ready;
     } catch (_) {
       return false;
     }
+  }
+
+  /// One discovery and one TLS connection. No saved-port retry on failure.
+  Future<void> connectAutomatically() async {
+    if (ready) return;
+    final pending = _automaticConnection;
+    if (pending != null) return pending;
+    final operation = _discoverAndConnect();
+    _automaticConnection = operation;
+    try {
+      await operation;
+    } finally {
+      if (identical(_automaticConnection, operation)) {
+        _automaticConnection = null;
+      }
+    }
+  }
+
+  Future<void> _discoverAndConnect() async {
+    try {
+      final activation = await channel
+          .invokeMethod<String>('ensureWirelessDebug')
+          .timeout(const Duration(seconds: 5));
+      switch (activation) {
+        case 'no_wifi':
+          throw const ZeppBootstrapException(
+            'ADB_WIFI_REQUIRED',
+            'Collega il telefono a una rete Wi-Fi per preparare il servizio.',
+          );
+        case 'authorization_required':
+          zeppDiagnostic('ADB_WIFI_MANUAL_ACTIVATION');
+        case 'already_enabled':
+          zeppDiagnostic('ADB_WIFI_ALREADY_ENABLED');
+        case 'enable_requested':
+          zeppDiagnostic('ADB_WIFI_ENABLE_REQUESTED');
+        default:
+          throw const ZeppBootstrapException(
+            'ADB_WIFI_STATE_INVALID',
+            'Stato Debug wireless non disponibile.',
+          );
+      }
+      zeppDiagnostic('ADB_DISCOVERY_START');
+      final snapshot = await channel
+          .invokeMapMethod<Object?, Object?>('discoverConnect')
+          .timeout(const Duration(seconds: 12));
+      final port = selectSelfAdbConnectPort(snapshot ?? {});
+      zeppDiagnostic('ADB_DISCOVERY_SELECTED');
+      await connect(port);
+      zeppDiagnostic('ADB_AUTO_CONNECTED');
+    } catch (error) {
+      zeppDiagnostic('ADB_AUTO_CONNECT_ERROR');
+      final code = error is ZeppBootstrapException
+          ? error.code
+          : error is PlatformException
+          ? error.code
+          : null;
+      if (code != null &&
+          RegExp(r'^ADB_(DISCOVERY|WIFI)_[A-Z_]+$').hasMatch(code)) {
+        zeppDiagnostic(code);
+      }
+      rethrow;
+    }
+  }
+
+  /// Called once when this app process opens. Observations and foreground
+  /// resumes never create a retry loop. No BEGIN, restore or music command.
+  Future<void> prepareOnOpen() => _startup ??= prepareOnForeground();
+
+  void startAutomaticPreparation() {
+    if (_appLifecycle != null) return;
+    _appLifecycle = AppLifecycleListener(
+      onPause: () => _wasInBackground = true,
+      onResume: () {
+        if (_wasInBackground) {
+          _wasInBackground = false;
+          unawaited(prepareOnForeground());
+        }
+      },
+    );
+    unawaited(prepareOnOpen());
+  }
+
+  /// A genuine app reopening is a new user action, not a timer retry.
+  Future<void> prepareOnForeground() async {
+    if (ready && _directStatus?.connected == true) return;
+    final pending = _openingPreparation;
+    if (pending != null) return pending;
+    final operation = _prepareOnOpen();
+    _openingPreparation = operation;
+    try {
+      await operation;
+    } finally {
+      if (identical(_openingPreparation, operation)) _openingPreparation = null;
+    }
+  }
+
+  Future<void> _prepareOnOpen() async {
+    try {
+      await prepareForUse();
+    } catch (_) {
+      /* Visible status, no automatic retry. */
+    }
+  }
+
+  /// Explicit setup completion may prepare the already-connected channel.
+  Future<void> prepareForUse({bool alreadyConnected = false}) async {
+    startupStatus.value = 'Preparazione del collegamento all’orologio…';
+    startupFailed.value = false;
+    try {
+      if (!alreadyConnected) await connectAutomatically();
+      // B1 is read-only: preparing it cannot suspend Zepp's permissions.
+      await prepareOfflineStatus(allowReconnect: false);
+      startupStatus.value =
+          'Collegamento preparato. Per inviare un brano premi Invia all’orologio.';
+      zeppDiagnostic('APP_PREPARATION_READY');
+    } catch (_) {
+      startupFailed.value = true;
+      startupStatus.value =
+          'Preparazione non riuscita. Controlla Wi-Fi e Debug wireless. '
+          'La prima volta autorizza SyncBeat dalla configurazione.';
+      zeppDiagnostic('APP_PREPARATION_ERROR');
+      rethrow;
+    }
+  }
+
+  Future<ZeppDirectStatus> prepareOfflineStatus({
+    bool allowReconnect = true,
+  }) async {
+    if (_active) {
+      throw const ZeppBootstrapException(
+        'DIRECT_BUSY',
+        'Attendi il ripristino di Zepp prima di preparare il canale locale.',
+      );
+    }
+    final existing = _directStatus;
+    if (existing != null && existing.connected) return existing.readStatus();
+    final preparation = _directPreparation ??= _startDirectStatus(
+      allowReconnect: allowReconnect,
+    );
+    try {
+      final session = await preparation;
+      _directStatus = session;
+      return await session.readStatus();
+    } finally {
+      if (identical(_directPreparation, preparation)) _directPreparation = null;
+    }
+  }
+
+  Future<ZeppDirectStatus> offlineStatus() async {
+    final session = _directStatus;
+    if (session == null) {
+      throw const ZeppBootstrapException(
+        'DIRECT_UNAVAILABLE',
+        'Prepara prima il canale locale con Wi-Fi e Debug wireless autorizzato.',
+      );
+    }
+    return session.readStatus();
+  }
+
+  Future<ZeppDirectStatusSession> _startDirectStatus({
+    bool allowReconnect = true,
+  }) async {
+    if (!ready && (!allowReconnect || !await reconnect())) {
+      throw const ZeppBootstrapException(
+        'DIRECT_ADB_UNAVAILABLE',
+        'Per preparare il canale locale serve il Debug wireless collegato. Configuralo in SyncBeat.',
+      );
+    }
+    final connection = _connection!;
+    final generation = _connectionGeneration;
+    final apk = await _bootstrapApk();
+    // Independent from the public endpoint nonce of the permission helper.
+    // RAM only. It is sent once on stdin after the non-echo input marker.
+    final random = Random.secure();
+    final bytes = List<int>.generate(32, (_) => random.nextInt(256));
+    final credential = base64Encode(bytes);
+    bytes.fillRange(0, bytes.length, 0);
+    zeppDiagnostic('DIRECT_BOOTSTRAP_START');
+    final launch = await ZeppAdbStream.open(
+      connection,
+      ++_nextStreamId,
+      'shell:stty -echo && trap "" HUP && CLASSPATH=$apk exec /system/bin/app_process /system/bin com.example.syncbeat.ZeppAdbLeaseServer --direct-status-v1 2>/dev/null',
+    );
+    final int port;
+    try {
+      port = await exchangeDirectStatusBootstrap(
+        launch.onPayload,
+        launch.writeString,
+        credential,
+      );
+    } finally {
+      await launch.close();
+      zeppDiagnostic('DIRECT_BOOTSTRAP_CLOSED');
+    }
+    if (generation != _connectionGeneration) {
+      throw const ZeppBootstrapException(
+        'DIRECT_BOOTSTRAP_CANCELLED',
+        'La connessione ADB è cambiata durante la preparazione del canale locale.',
+      );
+    }
+    // From here the new session has no ADB dependency, including Wi-Fi loss.
+    return ZeppDirectStatusSession.connect(port, credential);
+  }
+
+  Future<String> _bootstrapApk() async {
+    final info = await channel.invokeMapMethod<String, dynamic>('bootstrap');
+    final apk = info?['apkPath'] as String? ?? '';
+    if (info?['user'] != 0 ||
+        !RegExp(r'^/data/app/[A-Za-z0-9_./~+=-]+/base\.apk$').hasMatch(apk)) {
+      throw StateError(
+        'Il coordinamento ADB richiede il profilo principale di Android.',
+      );
+    }
+    return apk;
   }
 
   Future<void> _ensureHelper({bool allowBootstrap = true}) async {
@@ -249,14 +549,7 @@ class EmbeddedAdb {
     }
     final connection = _connection!;
     final generation = _connectionGeneration;
-    final info = await channel.invokeMapMethod<String, dynamic>('bootstrap');
-    final apk = info?['apkPath'] as String? ?? '';
-    if (info?['user'] != 0 ||
-        !RegExp(r'^/data/app/[A-Za-z0-9_./~+=-]+/base\.apk$').hasMatch(apk)) {
-      throw StateError(
-        'Il coordinamento ADB richiede il profilo principale di Android.',
-      );
-    }
+    final apk = await _bootstrapApk();
     final random = Random.secure();
     final nonce = List.generate(
       32,

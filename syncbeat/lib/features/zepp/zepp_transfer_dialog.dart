@@ -21,15 +21,28 @@ Future<void> showZeppTransferDialog(
   builder: (_) => ZeppTransferDialog(file: file, client: client),
 );
 
+Future<bool> showWatchDownloadSetup(
+  BuildContext context,
+  PublishedAudio file,
+) async =>
+    await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => ZeppTransferDialog(file: file, configureOnly: true),
+    ) ??
+    false;
+
 class ZeppTransferDialog extends StatefulWidget {
   const ZeppTransferDialog({
     super.key,
     required this.file,
     this.client = const ZeppClient(),
     this.events,
+    this.configureOnly = false,
   });
   final PublishedAudio file;
   final ZeppClient client;
+  final bool configureOnly;
 
   /// Sostituibile nei test; di norma arriva dal canale Android.
   final Stream<ZeppEvent>? events;
@@ -137,6 +150,38 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog>
       }
     } finally {
       await _refreshCoordination();
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _checkOfflineHelper({required bool prepare}) async {
+    setState(() {
+      _busy = true;
+      _failed = false;
+      _status = prepare
+          ? 'Preparazione del canale locale di prova…'
+          : 'Lettura dello stato dal canale locale…';
+    });
+    try {
+      await widget.client.offlineHelperStatus(prepare: prepare);
+      if (mounted) {
+        setState(
+          () => _status = prepare
+              ? 'Canale locale preparato. Ora puoi verificarne lo stato anche senza Wi-Fi.'
+              : 'Stato ricevuto direttamente dal servizio locale.',
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _failed = true;
+          _status = error is ZeppException
+              ? error.message
+              : 'Verifica del canale locale non riuscita.';
+        });
+      }
+    } finally {
+      // Reading the direct channel must not invoke status/recovery over ADB.
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -265,6 +310,49 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog>
     }
   }
 
+  Future<void> _saveDownloadConfiguration() async {
+    final device = _device;
+    if (device == null) {
+      setState(() => _status = 'Scegli il tuo orologio.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _status = null;
+    });
+    try {
+      final entered = _key.text.trim();
+      final key = entered.isEmpty
+          ? await widget.client.savedKey(device)
+          : entered;
+      if (key == null || !isValidZeppKey(key)) {
+        throw const ZeppException(
+          'Inserisci la chiave di abbinamento Zepp: 32 cifre esadecimali.',
+        );
+      }
+      if (!await widget.client.authorizeCoordination()) {
+        throw const ZeppException(
+          'Collega il Debug wireless dalla configurazione qui sotto, poi salva.',
+        );
+      }
+      await widget.client.rememberKey(device, key);
+      await widget.client.rememberDownloadDevice(device);
+      await widget.client.setCoordinationEnabled(true);
+      _key.clear();
+      if (mounted) Navigator.pop(context, true);
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _status = error is ZeppException
+              ? error.message
+              : 'Configurazione non riuscita. Nessun invio avviato.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -272,6 +360,7 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog>
     zeppDiagnostic('UI_OPEN');
     unawaited(widget.client.secureScreen(true));
     unawaited(_refreshCoordination());
+    if (widget.configureOnly) unawaited(_loadDevices());
     _sub = (widget.events ?? widget.client.events).listen((event) {
       if (!mounted || !_busy) return;
       setState(() {
@@ -293,7 +382,7 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog>
   void dispose() {
     zeppDiagnostic('UI_DISPOSE');
     WidgetsBinding.instance.removeObserver(this);
-    if (_busy) unawaited(widget.client.cancel());
+    if (_busy && !widget.configureOnly) unawaited(widget.client.cancel());
     unawaited(widget.client.secureScreen(false));
     _sub?.cancel();
     _key.clear();
@@ -318,8 +407,8 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog>
         _key.clear();
         _hasSavedKey = false;
         _status = devices.isEmpty
-            ? 'Nessun dispositivo abbinato. Non fare reset o nuovi abbinamenti per questa prova.'
-            : 'Scegli il tuo orologio dall\'elenco. L\'elenco da solo non prova la compatibilita\'.';
+            ? 'Nessun dispositivo abbinato disponibile.'
+            : 'Scegli il tuo orologio dall\'elenco.';
       });
     } on ZeppException catch (error) {
       if (mounted) {
@@ -475,17 +564,73 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog>
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Invia all\'orologio'),
+    title: Text(
+      widget.configureOnly
+          ? 'Configura invio all’orologio'
+          : 'Invia all\'orologio',
+    ),
     content: SizedBox(
       width: 520,
-      child: SingleChildScrollView(child: _body(context)),
+      child: SingleChildScrollView(
+        child: widget.configureOnly ? _downloadSetupBody() : _body(context),
+      ),
     ),
     actions: [
-      TextButton(onPressed: _licenses, child: const Text('Licenze')),
+      if (widget.configureOnly)
+        FilledButton(
+          onPressed: _busy ? null : _saveDownloadConfiguration,
+          child: const Text('Salva e continua'),
+        )
+      else
+        TextButton(onPressed: _licenses, child: const Text('Licenze')),
       TextButton(
         onPressed: _busy ? null : () => Navigator.pop(context),
         child: const Text('Chiudi'),
       ),
+    ],
+  );
+
+  Widget _downloadSetupBody() => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const Text(
+        'Configura una volta l’orologio. Per inviare un brano premi Invia all’orologio dopo il download. '
+        'SyncBeat sospende temporaneamente Dispositivi nelle vicinanze di Zepp durante l’invio '
+        'e ripristina lo stato iniziale alla fine. Tieni l’app aperta fino al completamento.',
+      ),
+      const SizedBox(height: 12),
+      DropdownButtonFormField<ZeppDevice>(
+        key: ValueKey(_devices.length),
+        initialValue: _device,
+        isExpanded: true,
+        decoration: const InputDecoration(labelText: 'Orologio abbinato'),
+        items: [
+          for (final device in _devices)
+            DropdownMenuItem(value: device, child: Text(device.label)),
+        ],
+        onChanged: _busy ? null : _selectDevice,
+      ),
+      const SizedBox(height: 12),
+      TextField(
+        controller: _key,
+        enabled: !_busy,
+        obscureText: true,
+        autocorrect: false,
+        enableSuggestions: false,
+        decoration: InputDecoration(
+          labelText: 'Chiave Zepp',
+          helperText: _hasSavedKey
+              ? 'Chiave già salvata: lascia vuoto per usarla.'
+              : '32 cifre esadecimali; conservata nell’archivio sicuro.',
+        ),
+      ),
+      TextButton(
+        onPressed: _busy ? null : () => showEmbeddedAdbSetup(context),
+        child: const Text('Configura Debug wireless'),
+      ),
+      if (_busy) const LinearProgressIndicator(),
+      if (_status != null) Text(_status!),
     ],
   );
 
@@ -561,6 +706,19 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog>
             child: const Text('Prova sospensione e ripristino (senza file)'),
           ),
         ],
+        const Text(
+          'Canale locale di prova: legge soltanto lo stato del servizio. '
+          'Per prepararlo servono Wi-Fi e Debug wireless autorizzato. '
+          'Se app o servizio vengono terminati, va preparato di nuovo con Wi-Fi.',
+        ),
+        OutlinedButton(
+          onPressed: _busy ? null : () => _checkOfflineHelper(prepare: true),
+          child: const Text('Prepara canale senza Wi-Fi (solo stato)'),
+        ),
+        OutlinedButton(
+          onPressed: _busy ? null : () => _checkOfflineHelper(prepare: false),
+          child: const Text('Verifica canale locale (solo stato)'),
+        ),
         const SizedBox(height: 12),
         ListTile(
           contentPadding: EdgeInsets.zero,

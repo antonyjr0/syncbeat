@@ -8,24 +8,23 @@ import 'package:syncbeat/features/audio_sources/public_audio_storage.dart';
 class _Storage extends PublicAudioStorage {
   bool exists = true;
   @override
-  Future<List<PublishedAudio>> list() async => exists
-      ? [
-          const PublishedAudio(
-            'content://media/external/downloads/42',
-            'Own tone.mp3',
-          ),
-        ]
-      : [];
+  Future<List<PublishedAudio>> list() async {
+    final result = exists
+        ? [
+            const PublishedAudio(
+              'content://media/external/downloads/42',
+              'Own tone.mp3',
+            ),
+          ]
+        : <PublishedAudio>[];
+    return result;
+  }
 }
 
 void main() {
   testWidgets(
     'published content URI is shown, played via native player, stopped and removed after external deletion',
     (tester) async {
-      final directory = (await tester.runAsync(
-        () => Directory.systemTemp.createTemp('syncbeat-library-test-'),
-      ))!;
-      addTearDown(() => directory.delete(recursive: true));
       final storage = _Storage();
       final calls = <MethodCall>[];
       const channel = MethodChannel('syncbeat/youtube');
@@ -41,18 +40,15 @@ void main() {
         () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
             .setMockMethodCallHandler(channel, null),
       );
-      await tester.runAsync(() async {
-        await tester.pumpWidget(
-          MaterialApp(
-            home: LocalAudioLibrary(
-              storage: storage,
-              legacyDirectory: directory,
-              android: true,
-            ),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LocalAudioLibrary(
+            storage: storage,
+            legacyDirectory: _EmptyLegacyDirectory(),
+            android: true,
           ),
-        );
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-      });
+        ),
+      );
       await tester.pumpAndSettle();
       expect(find.text('Own tone.mp3'), findsOneWidget);
       await tester.tap(find.byTooltip('Riproduci'));
@@ -63,13 +59,20 @@ void main() {
       await tester.pump();
       expect(calls.last.method, 'stop');
       storage.exists = false;
-      await tester.runAsync(() async {
-        await tester.tap(find.byIcon(Icons.refresh));
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-      });
+      await tester.tap(find.byIcon(Icons.refresh));
       await tester.pumpAndSettle();
       expect(find.text('Own tone.mp3'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     },
   );
+}
+
+class _EmptyLegacyDirectory implements Directory {
+  @override
+  Stream<FileSystemEntity> list({
+    bool recursive = false,
+    bool followLinks = true,
+  }) => const Stream.empty();
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

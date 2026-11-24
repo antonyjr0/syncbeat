@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'android_youtube_bridge.dart';
 
 import '../../models/spotify_models.dart';
+import '../zepp/zepp_download_transfer.dart';
+import '../zepp/zepp_transfer_dialog.dart';
+import '../zepp/zepp_client.dart';
 import 'audio_source.dart';
 import 'staging_storage.dart';
 import 'public_audio_storage.dart';
@@ -21,6 +26,7 @@ class YoutubeMatchDialog extends StatefulWidget {
     this.storage,
     this.downloader,
     this.updateAndroidEngine,
+    this.watchTransfer,
     super.key,
   });
   final SpotifyTrack track;
@@ -30,6 +36,7 @@ class YoutubeMatchDialog extends StatefulWidget {
   final YoutubeMatcher matcher;
   final AudioStagingStorage? storage;
   final YoutubeDownloader? downloader;
+  final ZeppDownloadTransfer? watchTransfer;
   final Future<void> Function(DownloadCancellationToken token)?
   updateAndroidEngine;
   @override
@@ -49,6 +56,9 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
   String? _message;
   String _phase = 'Caricamento associazione';
   StagedAudioFile? _downloaded;
+  late final _watchTransfer = widget.watchTransfer ?? ZeppDownloadTransfer();
+  bool _sending = false;
+  bool _transferFailed = false;
   final _selectionPanel = GlobalKey();
   final _statusPanel = GlobalKey();
 
@@ -66,6 +76,7 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
     setState(() {
       _selected = video;
       _downloaded = null;
+      _transferFailed = false;
       final approval = video?.id == _saved?.id && _saved != null
           ? YoutubeAssociations.authorizationFor(_saved!)
           : null;
@@ -112,7 +123,7 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
 
   @override
   void dispose() {
-    _operation?.cancel();
+    _cancelOperation();
     super.dispose();
   }
 
@@ -122,6 +133,8 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
       _operation = token;
       _message = null;
       _selected = null;
+      _downloaded = null;
+      _transferFailed = false;
       _results = [];
       _progress = null;
       _phase = 'Ricerca YouTube';
@@ -282,6 +295,7 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
       _message = 'Download e conversione MP3…';
       _progress = null;
       _downloaded = null;
+      _transferFailed = false;
       _phase = 'Preparazione download';
     });
     _revealStatus();
@@ -383,6 +397,79 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
     }
   }
 
+  Future<void> _sendDownloaded(
+    StagedAudioFile file, {
+    required bool allowSetup,
+  }) async {
+    _sending = true;
+    try {
+      await _watchTransfer.send(
+        PublishedAudio(file.path, file.fileName),
+        title: widget.track.title,
+        artist: widget.track.artistLine,
+        onEvent: (event) {
+          if (!mounted) return;
+          setState(() {
+            if (event.isProgress) {
+              _progress = DownloadProgress(
+                receivedBytes: event.done,
+                totalBytes: event.total,
+              );
+            } else {
+              _phase = event.text!;
+              _progress = null;
+              _message =
+                  'MP3 salvato in Download/SyncBeat: ${file.fileName}\n${event.text}';
+            }
+          });
+        },
+      );
+      if (mounted) setState(() => _transferFailed = false);
+    } on ZeppDownloadSetupRequired catch (error) {
+      if (!mounted) return;
+      if (allowSetup &&
+          await showWatchDownloadSetup(
+            context,
+            PublishedAudio(file.path, file.fileName),
+          ) &&
+          mounted) {
+        await _sendDownloaded(file, allowSetup: false);
+      } else if (mounted) {
+        setState(() {
+          _transferFailed = true;
+          _message = 'MP3 salvato: ${file.fileName}. ${error.message}';
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _transferFailed = true;
+          _message =
+              'MP3 salvato: ${file.fileName}. Invio non completato. '
+              '${error is ZeppException ? error.message : 'Collegamento all’orologio non disponibile.'}';
+        });
+      }
+    } finally {
+      _sending = false;
+    }
+  }
+
+  Future<void> _retryWatchSend() async {
+    final file = _downloaded;
+    if (file == null || _operation != null) return;
+    setState(() => _operation = DownloadCancellationToken());
+    try {
+      await _sendDownloaded(file, allowSetup: true);
+    } finally {
+      if (mounted) setState(() => _operation = null);
+    }
+  }
+
+  void _cancelOperation() {
+    _operation?.cancel();
+    if (_sending) unawaited(_watchTransfer.cancel());
+  }
+
   @override
   Widget build(BuildContext context) => AlertDialog(
     title: Text('YouTube · ${widget.track.title}'),
@@ -399,6 +486,11 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
             const Text(
               'Fino a 10 risultati. Il punteggio suggerisce una corrispondenza: scegli e salva manualmente dopo l’ascolto.',
             ),
+            if (defaultTargetPlatform == TargetPlatform.android)
+              const Text(
+                'Dopo il salvataggio puoi premere Invia all’orologio. '
+                'Il download da solo non avvia l’invio.',
+              ),
             if (_saved != null)
               ListTile(
                 title: Text('Scelta salvata in precedenza: ${_saved!.title}'),
@@ -427,7 +519,7 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
                     : '$_phase · ${(_progress!.fraction! * 100).toStringAsFixed(0)}%',
               ),
               TextButton(
-                onPressed: () => _operation?.cancel(),
+                onPressed: _cancelOperation,
                 child: const Text('Annulla operazione'),
               ),
             ],
@@ -446,6 +538,12 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
                     icon: const Icon(Icons.folder_open),
                     label: const Text('Apri cartella'),
                   ),
+                  if (defaultTargetPlatform == TargetPlatform.android)
+                    TextButton.icon(
+                      onPressed: _operation != null ? null : _retryWatchSend,
+                      icon: Icon(_transferFailed ? Icons.refresh : Icons.watch),
+                      label: const Text('Invia all’orologio'),
+                    ),
                 ],
               ),
             if (_selected != null) ...[

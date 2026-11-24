@@ -1,14 +1,20 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import '../../theme/syncbeat_theme.dart';
 
 import '../../config/app_config.dart';
 import '../../models/spotify_models.dart';
+import '../zepp/zepp_download_transfer.dart';
+import '../zepp/zepp_transfer_dialog.dart';
+import '../zepp/zepp_client.dart';
 import 'audio_source.dart';
 import 'jamendo_downloader.dart';
 import 'jamendo_provider.dart';
 import 'local_mp3_provider.dart';
+import 'public_audio_storage.dart';
 import 'staging_storage.dart';
 import 'track_matcher.dart';
 import 'youtube_match_dialog.dart';
@@ -21,6 +27,7 @@ class AudioMatchDialog extends StatefulWidget {
     this.localProvider,
     this.downloadManager,
     this.matcher,
+    this.watchTransfer,
     super.key,
   });
 
@@ -29,6 +36,7 @@ class AudioMatchDialog extends StatefulWidget {
   final LocalMp3Provider? localProvider;
   final AudioDownloadManager? downloadManager;
   final TrackMatcher? matcher;
+  final ZeppDownloadTransfer? watchTransfer;
 
   @override
   State<AudioMatchDialog> createState() => _AudioMatchDialogState();
@@ -48,6 +56,10 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
   bool _searching = false;
   bool _downloading = false;
   String? _errorMessage;
+  late final _watchTransfer = widget.watchTransfer ?? ZeppDownloadTransfer();
+  bool _sending = false;
+  bool _transferFailed = false;
+  String? _watchMessage;
 
   @override
   void initState() {
@@ -70,6 +82,7 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
   @override
   void dispose() {
     _cancellationToken?.cancel();
+    if (_sending) unawaited(_watchTransfer.cancel());
     super.dispose();
   }
 
@@ -80,6 +93,8 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
       _result = null;
       _selectedCandidate = null;
       _stagedFile = null;
+      _watchMessage = null;
+      _transferFailed = false;
     });
     try {
       final candidates = await _jamendo.search(widget.track);
@@ -141,6 +156,8 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
       _searching = true;
       _errorMessage = null;
       _stagedFile = null;
+      _watchMessage = null;
+      _transferFailed = false;
     });
     try {
       final candidates = await _local.pickFiles(userConfirmedRights: true);
@@ -205,6 +222,9 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
     final cancellationToken = DownloadCancellationToken();
     setState(() {
       _downloading = true;
+      _stagedFile = null;
+      _watchMessage = null;
+      _transferFailed = false;
       _cancellationToken = cancellationToken;
       _errorMessage = null;
       _progress = DownloadProgress(receivedBytes: 0);
@@ -217,7 +237,9 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
           if (mounted) setState(() => _progress = progress);
         },
       );
-      if (mounted) setState(() => _stagedFile = stagedFile);
+      if (mounted) {
+        setState(() => _stagedFile = stagedFile);
+      }
     } catch (error) {
       if (mounted) setState(() => _errorMessage = error.toString());
     } finally {
@@ -227,6 +249,73 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
           _cancellationToken = null;
         });
       }
+    }
+  }
+
+  Future<void> _sendSavedFile(
+    StagedAudioFile file, {
+    required bool allowSetup,
+  }) async {
+    _sending = true;
+    try {
+      await _watchTransfer.send(
+        PublishedAudio(file.path, file.fileName),
+        title: widget.track.title,
+        artist: widget.track.artistLine,
+        onEvent: (event) {
+          if (mounted) {
+            setState(() {
+              if (event.isProgress) {
+                _progress = DownloadProgress(
+                  receivedBytes: event.done,
+                  totalBytes: event.total,
+                );
+              } else {
+                _watchMessage = event.text;
+                _progress = null;
+              }
+            });
+          }
+        },
+      );
+      if (mounted) setState(() => _transferFailed = false);
+    } on ZeppDownloadSetupRequired catch (error) {
+      if (!mounted) return;
+      if (allowSetup &&
+          await showWatchDownloadSetup(
+            context,
+            PublishedAudio(file.path, file.fileName),
+          ) &&
+          mounted) {
+        await _sendSavedFile(file, allowSetup: false);
+      } else if (mounted) {
+        setState(() {
+          _transferFailed = true;
+          _watchMessage = error.message;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _transferFailed = true;
+          _watchMessage =
+              'File salvato. Invio non completato. '
+              '${error is ZeppException ? error.message : 'Collegamento all’orologio non disponibile.'}';
+        });
+      }
+    } finally {
+      _sending = false;
+    }
+  }
+
+  Future<void> _retryWatchSend() async {
+    final file = _stagedFile;
+    if (file == null || _downloading) return;
+    setState(() => _downloading = true);
+    try {
+      await _sendSavedFile(file, allowSetup: true);
+    } finally {
+      if (mounted) setState(() => _downloading = false);
     }
   }
 
@@ -248,6 +337,11 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
               widget.track.artistLine,
               style: Theme.of(context).textTheme.bodyMedium,
             ),
+            if (defaultTargetPlatform == TargetPlatform.android)
+              const Text(
+                'Dopo il salvataggio puoi premere Invia all’orologio. '
+                'Il download da solo non avvia l’invio.',
+              ),
             SizedBox(height: 18),
             Wrap(
               spacing: 8,
@@ -303,8 +397,15 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
               SizedBox(height: 8),
               RadioGroup<AudioCandidate>(
                 groupValue: _selectedCandidate,
-                onChanged: (candidate) =>
-                    setState(() => _selectedCandidate = candidate),
+                onChanged: (candidate) {
+                  if (_downloading || _searching) return;
+                  setState(() {
+                    _selectedCandidate = candidate;
+                    _stagedFile = null;
+                    _watchMessage = null;
+                    _transferFailed = false;
+                  });
+                },
                 child: Column(
                   children: [
                     for (final item in _result!.candidates)
@@ -327,7 +428,10 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
                     ),
                   ),
                   TextButton.icon(
-                    onPressed: () => _cancellationToken?.cancel(),
+                    onPressed: () {
+                      _cancellationToken?.cancel();
+                      if (_sending) unawaited(_watchTransfer.cancel());
+                    },
                     icon: Icon(Icons.close_rounded, size: 17),
                     label: Text('Annulla'),
                   ),
@@ -342,6 +446,15 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
                   color: SyncBeatStatusColors.of(context).success,
                 ),
               ),
+              if (_watchMessage != null) Text(_watchMessage!),
+              if (defaultTargetPlatform == TargetPlatform.android)
+                TextButton.icon(
+                  onPressed: _downloading || _searching
+                      ? null
+                      : _retryWatchSend,
+                  icon: Icon(_transferFailed ? Icons.refresh : Icons.watch),
+                  label: const Text('Invia all’orologio'),
+                ),
             ],
             if (_result?.status == TrackMatchStatus.noMatch) ...[
               SizedBox(height: 14),
@@ -416,6 +529,7 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
         borderRadius: BorderRadius.circular(8),
       ),
       child: RadioListTile<AudioCandidate>(
+        enabled: !_downloading && !_searching,
         value: candidate,
         title: Text(
           candidate.title,

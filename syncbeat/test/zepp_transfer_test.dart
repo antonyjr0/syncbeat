@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:syncbeat/features/audio_sources/public_audio_storage.dart';
 import 'package:syncbeat/features/zepp/zepp_client.dart';
 import 'package:syncbeat/features/zepp/zepp_transfer_dialog.dart';
+import 'package:syncbeat/features/zepp/zepp_direct_status.dart';
 
 const _goodKey = '00112233445566778899aabbccddeeff';
 
@@ -87,6 +88,92 @@ void main() {
 
   group('finestra', () {
     const file = PublishedAudio('content://media/42', 'Brano.mp3');
+
+    testWidgets(
+      'one-time setup saves the chosen watch without any transfer or permission cycle',
+      (tester) async {
+        final client = _FakeClient();
+        _tall(tester);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: TextButton(
+                  onPressed: () => showDialog<bool>(
+                    context: context,
+                    builder: (_) => ZeppTransferDialog(
+                      file: file,
+                      client: client,
+                      configureOnly: true,
+                    ),
+                  ),
+                  child: const Text('Configura'),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('Configura'));
+        await tester.pumpAndSettle();
+        expect(
+          find.text('Prepara canale senza Wi-Fi (solo stato)'),
+          findsNothing,
+        );
+        expect(
+          find.text('Prova sospensione e ripristino (senza file)'),
+          findsNothing,
+        );
+        await tester.tap(find.byType(DropdownButtonFormField<ZeppDevice>));
+        await tester.pumpAndSettle();
+        await tester.tap(find.textContaining('Orologio test').last);
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byType(TextField), _goodKey);
+        await tester.tap(find.text('Salva e continua'));
+        await tester.pumpAndSettle();
+        expect(client.preferredDevice, 'AA:BB:CC:DD:EE:FF');
+        expect(client.coordinationEnabled, isTrue);
+        expect(client.sent, isEmpty);
+        expect(client.testCycles, 0);
+        expect(client.restores, 0);
+        expect(find.byType(ZeppTransferDialog), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'B1 prepares and reads status without permission or watch operations',
+      (tester) async {
+        final client = _FakeClient();
+        _tall(tester);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: ZeppTransferDialog(file: file, client: client),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final initialReads = client.coordinationReads;
+        final prepare = find.text('Prepara canale senza Wi-Fi (solo stato)');
+        await tester.ensureVisible(prepare);
+        await tester.tap(prepare);
+        await tester.pumpAndSettle();
+        final status = find.text('Verifica canale locale (solo stato)');
+        await tester.ensureVisible(status);
+        await tester.tap(status);
+        await tester.pumpAndSettle();
+        expect(client.offlineCalls, [true, false]);
+        expect(client.coordinationReads, initialReads);
+        expect(client.testCycles, 0);
+        expect(client.restores, 0);
+        expect(client.sent, isEmpty);
+        expect(client.verified, 0);
+        expect(client.coordinationEnabled, isFalse);
+        expect(
+          find.textContaining('Stato ricevuto direttamente'),
+          findsOneWidget,
+        );
+      },
+    );
 
     testWidgets(
       'gestione Zepp opt-in: prova senza file e recupero dopo errore',
@@ -290,16 +377,34 @@ void main() {
 }
 
 class _FakeClient extends ZeppClient {
+  String? preferredDevice;
+  @override
+  Future<void> rememberDownloadDevice(ZeppDevice device) async {
+    preferredDevice = device.address;
+  }
+
   bool coordinationEnabled = false,
       pendingRestore = false,
       permissionError = false;
   int testCycles = 0, restores = 0;
+  int coordinationReads = 0;
+  final offlineCalls = <bool>[];
   @override
-  Future<Map<String, dynamic>> coordinationStatus() async => {
-    'state': 'ready',
-    'enabled': coordinationEnabled,
-    'pendingRestore': pendingRestore,
-  };
+  Future<ZeppDirectStatus> offlineHelperStatus({bool prepare = false}) async {
+    offlineCalls.add(prepare);
+    return const ZeppDirectStatus(uid: 2000, pid: 1234);
+  }
+
+  @override
+  Future<Map<String, dynamic>> coordinationStatus() async {
+    coordinationReads++;
+    return {
+      'state': 'ready',
+      'enabled': coordinationEnabled,
+      'pendingRestore': pendingRestore,
+    };
+  }
+
   @override
   Future<bool> authorizeCoordination() async => true;
   @override

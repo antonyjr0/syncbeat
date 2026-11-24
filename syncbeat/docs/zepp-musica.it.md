@@ -292,3 +292,57 @@ Errore osservato su "Verifica collegamento": `Reaf failed, socket might closed o
 - Se fallisce, il messaggio indica fase e tipo di errore con i millisecondi (es. `IOException dopo 12 ms`), mai chiave o indirizzo.
 
 Il codice e' scritto qui e usa solo API Android standard: da OronBox e' stato preso solo il confronto (UUID, cancelDiscovery), non il testo del codice. OronBox e' AGPL-3.0 con termini aggiuntivi (obbligo di attribuzione se se ne distribuisce codice); chi la cita come origine non ne e' limitato. Non e' una garanzia che l'orologio risponda: si sa solo dopo il test.
+
+## Canale locale senza Wi-Fi, checkpoint B1 del 20/11/2026
+
+Nel dialogo esistente **Invia all'orologio** sono disponibili **Prepara canale senza Wi-Fi (solo stato)** e **Verifica canale locale (solo stato)**. Questa versione del canale espone la lettura dello stato del servizio. L'integrazione dei comandi di sospensione, ripristino e invio offline segue i checkpoint successivi del piano.
+
+Con Wi-Fi e Debug wireless autorizzato, il primo pulsante avvia il servizio e apre una connessione autenticata su `127.0.0.1`. La porta locale viene assegnata dal sistema e comunicata nel bootstrap. Le letture successive usano direttamente quella connessione, anche quando ADB risulta scollegato. Il secondo pulsante esegue una singola lettura di stato. Un errore termina quella richiesta e viene mostrato nel dialogo.
+
+La sessione usa una credenziale casuale da 256 bit, inviata soltanto dopo che il processo ha confermato il proprio stdin con echo disabilitato. La credenziale rimane in memoria. Dopo l'autenticazione il listener chiude l'accesso a nuove connessioni e resta associato al solo collegamento autenticato. Il processo di prova termina quando quel collegamento viene chiuso. La terminazione di SyncBeat o dell'helper richiede una nuova preparazione con Wi-Fi e Debug wireless. Questo vale anche dopo il riavvio del telefono. La permanenza della sessione con schermo spento su HyperOS è da verificare.
+
+Il bootstrap B1 riusa il collegamento ADB autorizzato corrente. Con l’incremento A2 del 23 novembre, se serve un nuovo collegamento la porta viene cercata tramite NSD, come descritto nella sezione seguente. Un errore richiede una nuova azione esplicita o una nuova apertura dell’app. Le conferme e l’attivazione del debug richieste da Android seguono le impostazioni di sistema.
+
+La prova reale B1 va concordata prima dell'installazione. Prevede preparazione con Wi-Fi, spegnimento temporaneo del Wi-Fi e una lettura di stato dal canale locale, con confronto dei permessi Zepp prima e dopo. Lo stato delle prove è riportato nella sezione **Modifiche apportate, 20 novembre 2026** del [resoconto](zepp-bootstrap-resoconto-2026-11-19.md).
+
+Il 23 novembre 2026 il checkpoint B1 è riuscito sul telefono HyperOS: lo stesso servizio ha risposto con Wi-Fi e Debug wireless spenti, senza nuovi bootstrap e con permessi Zepp invariati. La verifica riguarda il solo stato, con app in primo piano. Sospensione, ripristino e invio senza Wi-Fi restano ai checkpoint successivi; dettagli ed evidenze nella sezione del 23 novembre del resoconto.
+
+## Download con invio esplicito e preparazione all’apertura, 23 novembre 2026
+
+Il download da solo non invia musica. Dopo il salvataggio nel popup YouTube o Jamendo/MP3 locale, premi **Invia all’orologio** per un singolo invio al dispositivo configurato. Preparazione, avanzamento ed esito compaiono nello stesso popup. Il file usato è quello restituito dal salvataggio, anche quando Android restituisce un URI `content://`.
+
+All’avvio di SyncBeat su Android, e quando la riapri dopo averla lasciata in background, l’app cerca il servizio di connessione Debug wireless di questo telefono tramite Android NSD. Individua la porta corrente, effettua un solo collegamento autenticato e prepara il canale locale B1 senza inviare musica né sospendere permessi. Se il collegamento è già pronto lo riusa. La schermata iniziale mostra preparazione, disponibilità o errore. Non ci sono riconnessioni periodiche dopo un errore.
+
+La ricerca usa soltanto `_adb-tls-connect._tcp`, distinto dal servizio di pairing. Un candidato deve avere un nome ADB valido e risolversi a un indirizzo locale assegnato a questo telefono; la connessione usa comunque `127.0.0.1`. Se i candidati sono assenti o ambigui, l’app si ferma. La porta salvata non viene provata come secondo tentativo. La ricerca osserva i servizi per 5 secondi, con un limite complessivo nativo di 10 secondi, da verificare nelle condizioni reali della rete.
+
+Il 24 novembre 2026 la preparazione automatica è riuscita sul telefono HyperOS: all’apertura, con Wi-Fi e Debug wireless attivi, SyncBeat ha selezionato il solo servizio locale valido e preparato il canale autenticato in circa sei secondi, senza inserire la porta o premere comandi di preparazione. I permessi Zepp sono rimasti invariati. Questo esito riguarda la preparazione, senza musica o cicli di sospensione.
+
+La prima volta Android richiede Debug wireless attivo e l’autorizzazione/abbinamento di SyncBeat. Dopo l’abbinamento dalla notifica, l’app individua la porta di connessione e prepara il canale automaticamente. **Collega automaticamente** consente un nuovo tentativo esplicito. Il campo per la porta manuale compare soltanto dopo un errore. Android può richiedere di riattivare Debug wireless dopo un riavvio o quando cambia la rete: l’app non può promettere che resti abilitato per sempre.
+
+Se manca la configurazione dell’orologio, alla pressione di **Invia all’orologio** compare **Configura invio all’orologio**: scegli il dispositivo e usa la chiave già salvata oppure inseriscila. **Salva e continua** memorizza la scelta e prosegue l’invio richiesto. La configurazione da sola non sospende permessi e non invia musica. Le conferme di sistema di Android restano necessarie.
+
+Un errore di invio lascia il file salvato e mostra **Invia all’orologio** per un nuovo tentativo esplicito, senza riscaricare il file. Non partono tentativi automatici aggiuntivi né invii in coda. Un ripristino Zepp pendente blocca il nuovo invio e mostra le indicazioni di recupero. Chiudere il popup o annullare l’operazione interrompe l’invio usando il percorso di annullamento e ripristino esistente.
+
+Questo incremento usa ancora il flusso di sospensione e ripristino tramite Wi-Fi/ADB. Il canale locale B1 continua a esporre soltanto lo stato: l’invio senza Wi-Fi resta da implementare e verificare nei checkpoint successivi. **MP3 locali** conserva il percorso manuale già esistente. Le autorizzazioni al download e all’uso offline delle fonti mantengono le verifiche precedenti.
+
+## Attivazione opzionale del Debug wireless dall’app, 24 novembre 2026
+
+È stato predisposto un percorso opzionale per richiedere l’attivazione del Debug wireless quando SyncBeat prepara il collegamento. Prima controlla che il telefono sia collegato al Wi-Fi e che l’app abbia `WRITE_SECURE_SETTINGS`. Questo privilegio, più ampio dei normali permessi, richiede una concessione specifica una volta tramite ADB: non è il normale popup delle autorizzazioni Android. Non viene concesso dalla sola installazione della build.
+
+Con Wi-Fi e privilegio presenti, se il Debug wireless è spento, il codice richiede una sola attivazione della specifica impostazione `adb_wifi_enabled`. Continua poi con discovery e collegamento TLS: la sola scrittura dell’impostazione non viene considerata una prova di servizio pronto. Se è già acceso, non lo riscrive. Senza privilegio il codice non legge né modifica impostazioni protette e resta disponibile la preparazione verificata con Debug wireless acceso manualmente.
+
+Il 24 novembre 2026, con consenso esplicito dell’utente, il privilegio è stato concesso e l’accensione è stata verificata su HyperOS: partendo da Debug wireless spento e Wi-Fi collegato, l’apertura di SyncBeat lo ha attivato e ha portato il servizio allo stato pronto in circa sei secondi. Nessun inserimento manuale della porta, invio musicale o modifica dei permessi Zepp. Le eventuali conferme Android sulla rete e l’abbinamento iniziale restano applicabili.
+
+Il privilegio rimane concesso dopo i normali riavvii; non occorre ripetere il comando a ogni apertura. Il telefono non è stato riavviato durante questa prova: è stata verificata l’accensione del debug da un avvio a freddo dell’app. Dopo un riavvio l’app deve essere aperta con Wi-Fi collegato per eseguire la preparazione. Il privilegio può essere revocato dal PC con `adb shell pm revoke --user 0 com.example.syncbeat android.permission.WRITE_SECURE_SETTINGS`; in quel caso il debug dovrà essere acceso dalle impostazioni Android.
+
+Il privilegio consente tecnicamente di modificare impostazioni protette più ampie di quella usata dal nostro codice. Va quindi mantenuto solo per una build attendibile di SyncBeat. Il Debug wireless usa autenticazione e TLS, ma quando è attivo i computer precedentemente autorizzati possono collegarsi. L’accensione del debug prepara l’helper; l’invio musicale senza Wi-Fi richiede ancora gli incrementi successivi sul canale locale.
+
+## Concessione guidata dal telefono, 24 novembre 2026
+
+In **Impostazioni collegamento**, disponibile dalla home, la configurazione propone **Abilita collegamento automatico** con il testo: «Consente a SyncBeat di attivare il Debug wireless tramite un’autorizzazione alle impostazioni protette di Android.» Il tocco richiede la concessione attraverso la connessione ADB già autorizzata di SyncBeat, senza un altro popup o comandi da digitare.
+
+La prima volta restano necessari Wi-Fi, Debug wireless acceso e abbinamento Android dalla notifica. La ricerca della porta è automatica. Abbinamento, collegamento e semplice apertura dell’app non concedono da soli il privilegio: occorre premere **Abilita collegamento automatico**. Se il privilegio è già concesso, la configurazione lo indica e non lo richiede di nuovo.
+
+Il comando eseguito dall’app riguarda soltanto SyncBeat, il profilo principale e `WRITE_SECURE_SETTINGS`. L’app controlla lo stato effettivo Android prima di mostrare l’abilitazione riuscita. In caso di errore si ferma senza ripetere il comando automaticamente. La prova dopo la revoca del privilegio esistente è descritta nel resoconto.
+
+La concessione guidata è riuscita sul telefono il 24 novembre 2026: dopo la revoca via USB, l’utente ha premuto il pulsante in SyncBeat e l’app ha eseguito e verificato la nuova concessione tramite la propria connessione ADB. In questo passaggio non è stato eseguito alcun comando di concessione dal PC. La prova ha riusato il pairing già esistente; il primo abbinamento di un nuovo utente resta una verifica distinta.
