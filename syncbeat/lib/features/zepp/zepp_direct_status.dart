@@ -73,8 +73,7 @@ class ZeppDirectStatus {
   final int pid;
 }
 
-/// B1 session. The only public operation is a read-only status request.
-/// Neither this connection nor a status request invokes the ADB transport.
+/// Authenticated local session that survives the loss of the ADB transport.
 class ZeppDirectStatusSession {
   ZeppDirectStatusSession._(this._socket) {
     _subscription = _socket
@@ -99,6 +98,24 @@ class ZeppDirectStatusSession {
   }, replyTimeout: const Duration(seconds: 5));
 
   bool get connected => !_closed;
+
+  Future<void> beginLease(int timeoutMillis) =>
+      _leaseRequest('BEGIN $timeoutMillis');
+
+  Future<void> ping() => _leaseRequest('PING');
+
+  Future<void> restore() => _leaseRequest('RESTORE');
+
+  Future<void> _leaseRequest(String command) async {
+    try {
+      await _requests.request(command);
+    } catch (_) {
+      throw const ZeppBootstrapException(
+        'DIRECT_LEASE_FAILED',
+        'Operazione sui permessi Zepp non confermata. Se il canale locale è interrotto, riattiva il Wi-Fi per il ripristino.',
+      );
+    }
+  }
 
   static Future<ZeppDirectStatusSession> connect(
     int port,

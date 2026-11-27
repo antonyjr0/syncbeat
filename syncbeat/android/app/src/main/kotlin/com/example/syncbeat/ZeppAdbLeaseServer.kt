@@ -21,14 +21,21 @@ object ZeppAdbLeaseServer {
             System.out.println("SYNCBEAT_DIRECT_INPUT_V1")
             System.out.flush()
             val secret = ZeppDirectStatusServer.readBootstrapSecret(System.`in`)
-            val statusServer = try { ZeppDirectStatusServer(secret, Process.myUid(), Process.myPid()) }
+            val permissionService = lazy { ZeppPermissionService() }
+            val statusServer = try {
+                ZeppDirectStatusServer(secret, Process.myUid(), Process.myPid()) { command ->
+                    runCatching { leaseCommand(permissionService.value, command) }.getOrDefault("ERR")
+                }
+            }
                 finally { secret.fill(0) }
-            statusServer.use {
+            try { statusServer.use {
                 System.out.println("SYNCBEAT_DIRECT_READY_V1:${it.port}")
                 System.out.flush()
                 System.`in`.close()
                 System.out.close()
                 it.serve()
+            } } finally {
+                if (permissionService.isInitialized()) permissionService.value.destroy()
             }
             return
         }
@@ -88,11 +95,7 @@ object ZeppAdbLeaseServer {
                             when {
                                 command == "STATUS" -> helper.diagnosticStatus()
                                 command == "PING" -> "OK"
-                                command == "RESTORE" -> { helper.restore(); if (helper.pendingRestore()) "ERR" else "OK" }
-                                command.startsWith("BEGIN ") -> {
-                                    helper.beginLease(Binder(), command.removePrefix("BEGIN ").toLong())
-                                    "OK"
-                                }
+                                command == "RESTORE" || command.startsWith("BEGIN ") -> leaseCommand(helper, command)
                                 else -> "ERR"
                             }
                         } catch (_: Exception) { "ERR" }
@@ -115,5 +118,14 @@ object ZeppAdbLeaseServer {
             runCatching { server.close() }
             helper.destroy()
         }
+    }
+
+    private fun leaseCommand(helper: ZeppPermissionService, command: String): String {
+        if (command == "RESTORE") {
+            helper.restore()
+            return if (helper.pendingRestore()) "ERR" else "OK"
+        }
+        helper.beginLease(Binder(), command.removePrefix("BEGIN ").toLong())
+        return "OK"
     }
 }

@@ -301,9 +301,9 @@ Errore osservato su "Verifica collegamento": `Reaf failed, socket might closed o
 
 Il codice e' scritto qui e usa solo API Android standard: da OronBox e' stato preso solo il confronto (UUID, cancelDiscovery), non il testo del codice. OronBox e' AGPL-3.0 con termini aggiuntivi (obbligo di attribuzione se se ne distribuisce codice); chi la cita come origine non ne e' limitato. Non e' una garanzia che l'orologio risponda: si sa solo dopo il test.
 
-## Canale locale senza Wi-Fi, checkpoint B1 del 20/11/2026
+## Invio senza Wi-Fi dopo la preparazione
 
-Nel dialogo esistente **Invia all'orologio** sono disponibili **Prepara canale senza Wi-Fi (solo stato)** e **Verifica canale locale (solo stato)**. Questa versione del canale espone la lettura dello stato del servizio. L'integrazione dei comandi di sospensione, ripristino e invio offline segue i checkpoint successivi del piano.
+Apri SyncBeat con Wi-Fi e Debug wireless autorizzato. L'app prepara il canale locale all'apertura. Puoi prepararlo anche con **Prepara invio senza Wi-Fi** nel dialogo **Invia all'orologio**. Quando il canale è pronto, puoi spegnere il Wi-Fi e inviare un brano già salvato con il Bluetooth acceso. La sessione locale gestisce la sospensione e il ripristino dei permessi Zepp durante l'invio.
 
 Con Wi-Fi e Debug wireless autorizzato, il primo pulsante avvia il servizio e apre una connessione autenticata su `127.0.0.1`. La porta locale viene assegnata dal sistema e comunicata nel bootstrap. Le letture successive usano direttamente quella connessione, anche quando ADB risulta scollegato. Il secondo pulsante esegue una singola lettura di stato. Un errore termina quella richiesta e viene mostrato nel dialogo.
 
@@ -313,7 +313,9 @@ Il bootstrap B1 riusa il collegamento ADB autorizzato corrente. Con l’incremen
 
 La prova reale B1 va concordata prima dell'installazione. Prevede preparazione con Wi-Fi, spegnimento temporaneo del Wi-Fi e una lettura di stato dal canale locale, con confronto dei permessi Zepp prima e dopo. Lo stato delle prove è riportato nella sezione **Modifiche apportate, 20 novembre 2026** del [resoconto](zepp-bootstrap-resoconto-2026-11-19.md).
 
-Il 23 novembre 2026 il checkpoint B1 è riuscito sul telefono HyperOS: lo stesso servizio ha risposto con Wi-Fi e Debug wireless spenti, senza nuovi bootstrap e con permessi Zepp invariati. La verifica riguarda il solo stato, con app in primo piano. Sospensione, ripristino e invio senza Wi-Fi restano ai checkpoint successivi; dettagli ed evidenze nella sezione del 23 novembre del resoconto.
+Il 23 novembre 2026 la lettura di stato è stata verificata sul telefono HyperOS con Wi-Fi e Debug wireless spenti. Per verificare l'invio, controlla che il lettore dell'orologio mostri il brano e che i permessi di Zepp coincidano con quelli iniziali. Se il ripristino resta pendente dopo la perdita dell'helper, ricollega il Wi-Fi e usa **Ripristina permessi Zepp** prima di un nuovo invio.
+
+Il 27 novembre 2026, sullo Xiaomi 15T con Amazfit Active 3 Premium, il canale locale è stato preparato all'apertura di SyncBeat. Con Wi-Fi e Debug wireless spenti, lo stesso servizio ha sospeso i permessi Zepp e li ha ripristinati dopo la conferma dell'ultimo blocco MP3. L'invio è durato circa 41 secondi. La lettura finale da USB ha confermato i tre permessi Bluetooth di Zepp e i rispettivi flag iniziali.
 
 ## Download con invio esplicito e preparazione all’apertura, 23 novembre 2026
 
@@ -343,7 +345,7 @@ Se manca la configurazione dell’orologio, alla pressione di **Invia all’orol
 
 Un errore di invio lascia il file salvato e mostra **Invia all’orologio** per un nuovo tentativo esplicito, senza riscaricare il file. Non partono tentativi automatici aggiuntivi né invii in coda. Un ripristino Zepp pendente blocca il nuovo invio e mostra le indicazioni di recupero. Chiudere il popup o annullare l’operazione interrompe l’invio usando il percorso di annullamento e ripristino esistente.
 
-Questo incremento usa ancora il flusso di sospensione e ripristino tramite Wi-Fi/ADB. Il canale locale B1 continua a esporre soltanto lo stato: l’invio senza Wi-Fi resta da implementare e verificare nei checkpoint successivi. **MP3 locali** conserva il percorso manuale già esistente. Le autorizzazioni al download e all’uso offline delle fonti mantengono le verifiche precedenti.
+Gli invii dai popup usano il canale locale quando è disponibile. **MP3 locali** conserva il percorso manuale già esistente. Le autorizzazioni al download e all’uso offline delle fonti mantengono le verifiche precedenti.
 
 ## Attivazione opzionale del Debug wireless dall’app, 24 novembre 2026
 
@@ -355,7 +357,7 @@ Il 24 novembre 2026, con consenso esplicito dell’utente, il privilegio è stat
 
 Il privilegio rimane concesso dopo i normali riavvii; non occorre ripetere il comando a ogni apertura. Il telefono non è stato riavviato durante questa prova: è stata verificata l’accensione del debug da un avvio a freddo dell’app. Dopo un riavvio l’app deve essere aperta con Wi-Fi collegato per eseguire la preparazione. Il privilegio può essere revocato dal PC con `adb shell pm revoke --user 0 com.example.syncbeat android.permission.WRITE_SECURE_SETTINGS`; in quel caso il debug dovrà essere acceso dalle impostazioni Android.
 
-Il privilegio consente tecnicamente di modificare impostazioni protette più ampie di quella usata dal nostro codice. Va quindi mantenuto solo per una build attendibile di SyncBeat. Il Debug wireless usa autenticazione e TLS, ma quando è attivo i computer precedentemente autorizzati possono collegarsi. L’accensione del debug prepara l’helper; l’invio musicale senza Wi-Fi richiede ancora gli incrementi successivi sul canale locale.
+Il privilegio consente tecnicamente di modificare impostazioni protette più ampie di quella usata dal nostro codice. Va quindi mantenuto solo per una build attendibile di SyncBeat. Il Debug wireless usa autenticazione e TLS. Quando è attivo, i computer precedentemente autorizzati possono collegarsi. L’accensione del debug consente di preparare l’helper per l’invio via Bluetooth.
 
 ## Concessione guidata dal telefono, 24 novembre 2026
 

@@ -171,7 +171,7 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog>
       if (mounted) {
         setState(
           () => _status = prepare
-              ? 'Canale locale preparato. Ora puoi verificarne lo stato anche senza Wi-Fi.'
+              ? 'Canale locale preparato. Puoi inviare i brani anche con il Wi-Fi spento finché il canale resta attivo.'
               : 'Stato ricevuto direttamente dal servizio locale.',
         );
       }
@@ -776,13 +776,12 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog>
           ),
         ],
         const Text(
-          'Canale locale di prova: legge soltanto lo stato del servizio. '
-          'Per prepararlo servono Wi-Fi e Debug wireless autorizzato. '
+          'Per preparare l’invio senza Wi-Fi servono Wi-Fi e Debug wireless autorizzato. '
           'Se app o servizio vengono terminati, va preparato di nuovo con Wi-Fi.',
         ),
         OutlinedButton(
           onPressed: _busy ? null : () => _checkOfflineHelper(prepare: true),
-          child: const Text('Prepara canale senza Wi-Fi (solo stato)'),
+          child: const Text('Prepara invio senza Wi-Fi'),
         ),
         OutlinedButton(
           onPressed: _busy ? null : () => _checkOfflineHelper(prepare: false),

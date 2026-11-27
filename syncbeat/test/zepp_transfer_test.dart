@@ -115,10 +115,7 @@ void main() {
         );
         await tester.tap(find.text('Configura'));
         await tester.pumpAndSettle();
-        expect(
-          find.text('Prepara canale senza Wi-Fi (solo stato)'),
-          findsNothing,
-        );
+        expect(find.text('Prepara invio senza Wi-Fi'), findsNothing);
         expect(
           find.text('Prova sospensione e ripristino (senza file)'),
           findsNothing,
@@ -140,7 +137,7 @@ void main() {
     );
 
     testWidgets(
-      'B1 prepares and reads status without permission or watch operations',
+      'prepares and reads status without permission or watch operations',
       (tester) async {
         final client = _FakeClient();
         _tall(tester);
@@ -153,7 +150,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         final initialReads = client.coordinationReads;
-        final prepare = find.text('Prepara canale senza Wi-Fi (solo stato)');
+        final prepare = find.text('Prepara invio senza Wi-Fi');
         await tester.ensureVisible(prepare);
         await tester.tap(prepare);
         await tester.pumpAndSettle();

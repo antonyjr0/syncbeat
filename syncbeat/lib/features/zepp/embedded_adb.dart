@@ -36,6 +36,7 @@ class EmbeddedAdb {
   int _connectionGeneration = 0;
   int _bootstrapAttempt = 0;
   ZeppDirectStatusSession? _directStatus;
+  ZeppDirectStatusSession? _leaseSession;
   Future<ZeppDirectStatusSession>? _directPreparation;
   StreamSubscription<String>? _subscription;
   late final _requests = ZeppAdbRequests((line) async {
@@ -139,7 +140,7 @@ class EmbeddedAdb {
       try {
         switch (call.method) {
           case 'ready':
-            return ready;
+            return ready || _directStatus?.connected == true;
           case 'diagnostics':
             // Never reconnect or bootstrap during observation.
             if (!ready || _helper == null || _helper!.isClosed) {
@@ -160,22 +161,42 @@ class EmbeddedAdb {
               return <String, Object>{'leaseState': 'unknown'};
             }
           case 'prepare':
+            final local = _directStatus;
+            if (local != null && local.connected) {
+              await local.ping();
+              return null;
+            }
             await _ensureHelper();
             await _request('PING');
             zeppDiagnostic('HELPER_PREPARED');
             return null;
           case 'begin':
-            await _ensureHelper();
-            await _request('BEGIN ${call.arguments as int}');
+            final local = _directStatus;
+            _leaseSession = local != null && local.connected ? local : null;
+            final timeout = call.arguments as int;
+            if (_leaseSession != null) {
+              await _leaseSession!.beginLease(timeout);
+            } else {
+              await _ensureHelper();
+              await _request('BEGIN $timeout');
+            }
             _active = true;
             _heartbeat?.cancel();
-            _heartbeat = Timer.periodic(const Duration(seconds: 5), (_) async {
-              if (!_active) return;
+            _heartbeat = Timer.periodic(const Duration(seconds: 5), (
+              timer,
+            ) async {
+              if (!_active || !identical(_heartbeat, timer)) return;
               try {
-                await _request('PING');
+                final local = _leaseSession;
+                if (local != null) {
+                  await local.ping();
+                } else {
+                  await _request('PING');
+                }
               } catch (_) {
+                if (!_active || !identical(_heartbeat, timer)) return;
                 _active = false;
-                _heartbeat?.cancel();
+                timer.cancel();
                 try {
                   await channel.invokeMethod<void>('leaseLost');
                 } catch (_) {
@@ -187,8 +208,17 @@ class EmbeddedAdb {
           case 'restore':
             _active = false;
             _heartbeat?.cancel();
-            await _ensureHelper(allowBootstrap: call.arguments == true);
+            final allowBootstrap = call.arguments == true;
+            final local =
+                _leaseSession ?? (allowBootstrap ? _directStatus : null);
+            if (local != null && (local.connected || !allowBootstrap)) {
+              await local.restore();
+              _leaseSession = null;
+              return null;
+            }
+            await _ensureHelper(allowBootstrap: allowBootstrap);
             await _request('RESTORE');
+            _leaseSession = null;
             return null;
           default:
             throw MissingPluginException();
@@ -388,7 +418,7 @@ class EmbeddedAdb {
 
   /// A genuine app reopening is a new user action, not a timer retry.
   Future<void> prepareOnForeground() async {
-    if (ready && _directStatus?.connected == true) return;
+    if (_directStatus?.connected == true) return;
     final pending = _openingPreparation;
     if (pending != null) return pending;
     final operation = _prepareOnOpen();
@@ -414,7 +444,6 @@ class EmbeddedAdb {
     startupFailed.value = false;
     try {
       if (!alreadyConnected) await connectAutomatically();
-      // B1 is read-only: preparing it cannot suspend Zepp's permissions.
       await prepareOfflineStatus(allowReconnect: false);
       startupStatus.value =
           'Collegamento preparato. Per inviare un brano premi Invia all’orologio.';
@@ -619,7 +648,7 @@ class EmbeddedAdb {
   void _lostHelper() {
     zeppDiagnostic('HELPER_LOST');
     _helper = null;
-    if (_active) {
+    if (_active && _leaseSession == null) {
       _active = false;
       _heartbeat?.cancel();
       channel.invokeMethod<void>('leaseLost').ignore();

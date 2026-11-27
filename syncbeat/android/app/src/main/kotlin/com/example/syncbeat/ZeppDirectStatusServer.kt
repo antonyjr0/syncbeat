@@ -14,8 +14,12 @@ import java.security.MessageDigest
 import java.util.Base64
 import java.util.concurrent.TimeUnit
 
-/** B1 only. This class has no permission-service dependency or mutation commands. */
-internal class ZeppDirectStatusServer(secret: ByteArray, private val uid: Int, private val pid: Int) : Closeable {
+internal class ZeppDirectStatusServer(
+    secret: ByteArray,
+    private val uid: Int,
+    private val pid: Int,
+    private val leaseCommand: (String) -> String = { "ERR" },
+) : Closeable {
     init {
         require(secret.size == 32 && (uid == 2000 || uid == 0) && pid > 0)
     }
@@ -54,7 +58,13 @@ internal class ZeppDirectStatusServer(secret: ByteArray, private val uid: Int, p
                         while (!closed) {
                             val request = readLine(connection, null) ?: return
                             val requestId = requestId(request) ?: return
-                            val response = if (request.substringAfter('|') == "STATUS") "STATUS:1:$uid:$pid" else "ERR"
+                            val command = request.substringAfter('|')
+                            val response = when {
+                                command == "STATUS" -> "STATUS:1:$uid:$pid"
+                                command == "PING" -> "OK"
+                                command == "RESTORE" || command.matches(Regex("BEGIN [0-9]{5,6}")) -> leaseCommand(command)
+                                else -> "ERR"
+                            }
                             reply(connection, requestId, response)
                         }
                         return

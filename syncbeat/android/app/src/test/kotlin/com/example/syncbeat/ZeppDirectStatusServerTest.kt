@@ -26,13 +26,17 @@ class ZeppDirectStatusServerTest {
         }
     }
 
-    @Test fun authenticationIsRequiredAndOnlyStatusIsAccepted() {
-        val server = ZeppDirectStatusServer(secret, 2000, 1234)
+    @Test fun authenticationIsRequiredAndOnlyLeaseCommandsAreForwarded() {
+        val commands = mutableListOf<String>()
+        val server = ZeppDirectStatusServer(secret, 2000, 1234) { command ->
+            commands.add(command)
+            "OK"
+        }
         val executor = Executors.newSingleThreadExecutor()
         val running = executor.submit { server.serve() }
         try {
             connect(server.port).use { socket ->
-                send(socket, "1|STATUS")
+                send(socket, "1|BEGIN 20000")
                 assertEquals("1|ERR", socket.getInputStream().bufferedReader().readLine())
             }
             connect(server.port).use { socket ->
@@ -45,7 +49,11 @@ class ZeppDirectStatusServerTest {
                 assertEquals("3|OK", replies.readLine())
                 send(socket, "4|STATUS")
                 assertEquals("4|STATUS:1:2000:1234", replies.readLine())
-                for (command in listOf("BEGIN 20000", "RESTORE", "PING", "AUTH $credential")) {
+                for (command in listOf("BEGIN 20000", "PING", "RESTORE")) {
+                    send(socket, "5|$command")
+                    assertEquals("5|OK", replies.readLine())
+                }
+                for (command in listOf("BEGIN -1", "RESTORE other.package", "AUTH $credential")) {
                     send(socket, "5|$command")
                     assertEquals("5|ERR", replies.readLine())
                 }
@@ -56,9 +64,8 @@ class ZeppDirectStatusServerTest {
                     fail("The listener must close after authentication")
                 } catch (_: IOException) { }
             }
-            // EOF is the session boundary. No privileged process remains idle
-            // after the owner connection disappears in this status-only mode.
             running.get(2, TimeUnit.SECONDS)
+            assertEquals(listOf("BEGIN 20000", "RESTORE"), commands)
         } finally {
             server.close()
             executor.shutdownNow()

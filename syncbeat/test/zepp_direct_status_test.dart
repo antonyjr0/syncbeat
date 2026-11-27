@@ -55,13 +55,13 @@ void main() {
   );
 
   test(
-    'read-only session uses one loopback connection and reports helper death',
+    'lease and status use one loopback connection and report helper death',
     () async {
       final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
       final credential = base64Encode(List.filled(32, 17));
       Socket? peer;
       var connections = 0;
-      var requests = 0;
+      final requests = <String>[];
       final accepted = server.listen((socket) {
         connections++;
         peer = socket;
@@ -70,11 +70,17 @@ void main() {
             .transform(utf8.decoder)
             .transform(const LineSplitter())
             .listen((line) {
-              requests++;
               final id = line.split('|').first;
-              final authorized =
-                  line.substring(line.indexOf('|') + 1) == 'AUTH $credential';
-              socket.write('$id|${authorized ? 'OK' : 'STATUS:1:2000:1234'}\n');
+              final command = line.substring(line.indexOf('|') + 1);
+              requests.add(command);
+              final response = command == 'AUTH $credential'
+                  ? 'OK'
+                  : switch (command) {
+                      'STATUS' => 'STATUS:1:2000:1234',
+                      'BEGIN 20000' || 'PING' || 'RESTORE' => 'OK',
+                      _ => 'ERR',
+                    };
+              socket.write('$id|$response\n');
             }, onError: (_) {});
       });
       try {
@@ -85,14 +91,23 @@ void main() {
         final first = await session.readStatus();
         expect(first.uid, 2000);
         expect(first.pid, 1234);
-        await session.readStatus();
+        await session.beginLease(20000);
+        await session.ping();
+        await session.restore();
         expect(connections, 1);
-        expect(requests, 3);
+        expect(requests, [
+          'AUTH $credential',
+          'STATUS',
+          'BEGIN 20000',
+          'PING',
+          'RESTORE',
+        ]);
         peer!.destroy();
         await expectLater(
-          session.readStatus(),
-          throwsA(failureCode('DIRECT_UNAVAILABLE')),
+          session.restore(),
+          throwsA(failureCode('DIRECT_LEASE_FAILED')),
         );
+        await session.close();
         expect(session.connected, isFalse);
         expect(connections, 1);
       } finally {
