@@ -36,11 +36,9 @@ internal class AdbConnectDiscovery(context: Context) {
         var stopRequested = false
         var windowEnded = false
         var resolving = false
-        var resolutionFailed = false
-        val known = mutableSetOf<String>()
-        val lost = mutableSetOf<String>()
+        val entries = AdbDiscoveryEntries()
         val queue = java.util.ArrayDeque<NsdServiceInfo>()
-        val resolved = linkedMapOf<String, Map<String, Any>>()
+        val tracking = mutableMapOf<String, NsdManager.ServiceInfoCallback>()
         lateinit var listener: NsdManager.DiscoveryListener
         lateinit var window: Runnable
         lateinit var deadline: Runnable
@@ -57,40 +55,77 @@ internal class AdbConnectDiscovery(context: Context) {
             running = false
             main.removeCallbacks(window); main.removeCallbacks(deadline)
             stop()
+            if (Build.VERSION.SDK_INT >= 34) {
+                tracking.values.toList().forEach { callback ->
+                    runCatching { manager.unregisterServiceInfoCallback(callback) }
+                }
+                tracking.clear()
+            }
             if (code != null) result.error(code, "Ricerca Debug wireless non riuscita. Controlla Wi-Fi e autorizzazione Android.", null)
             else {
-                ZeppDiagnostics.record("NSD_DISCOVERY_SNAPSHOT", "local=${local.size} services=${resolved.size}")
-                result.success(mapOf("localAddresses" to local, "services" to resolved.values.toList()))
+                ZeppDiagnostics.record("NSD_DISCOVERY_SNAPSHOT", "local=${local.size} services=${entries.resolvedCount}")
+                result.success(mapOf("localAddresses" to local, "services" to entries.snapshot()))
             }
         }
         fun completeIfReady() {
-            if (windowEnded && stopped && !resolving && queue.isEmpty()) {
-                finish(if (resolutionFailed) "ADB_DISCOVERY_INCOMPLETE" else null)
+            if (windowEnded && stopped && !resolving && queue.isEmpty() && !entries.pendingResolution) {
+                finish(if (entries.resolutionFailed) "ADB_DISCOVERY_INCOMPLETE" else null)
             }
+        }
+        fun snapshot(info: NsdServiceInfo): Map<String, Any> {
+            val hosts = if (Build.VERSION.SDK_INT >= 34) info.hostAddresses else listOfNotNull(info.host)
+            return mapOf("name" to info.serviceName, "type" to info.serviceType, "port" to info.port,
+                "addresses" to hosts.mapNotNull { it.hostAddress?.substringBefore('%') })
+        }
+        fun track(info: NsdServiceInfo, ticket: AdbDiscoveryEntries.Ticket) {
+            if (Build.VERSION.SDK_INT < 34) return
+            val callback = object : NsdManager.ServiceInfoCallback {
+                override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) { main.post {
+                    if (finished || entries.ticket(ticket.name) != ticket) return@post
+                    tracking.remove(ticket.name); entries.fail(ticket); completeIfReady()
+                } }
+                override fun onServiceUpdated(updated: NsdServiceInfo) { main.post {
+                    if (finished) return@post
+                    if (entries.update(ticket, snapshot(updated))) {
+                        ZeppDiagnostics.record("NSD_SERVICE_UPDATED", "count=${entries.resolvedCount}")
+                    }
+                    completeIfReady()
+                } }
+                override fun onServiceLost() { main.post {
+                    if (finished || entries.ticket(ticket.name) != ticket) return@post
+                    // Keep registration until discovery loses this instance: a later
+                    // update can carry its new port. Invalidate the old value now.
+                    entries.invalidate(ticket)
+                    completeIfReady()
+                } }
+                override fun onServiceInfoCallbackUnregistered() { main.post {
+                    if (finished || entries.ticket(ticket.name) != ticket) return@post
+                    tracking.remove(ticket.name); entries.fail(ticket); completeIfReady()
+                } }
+            }
+            tracking[info.serviceName] = callback
+            try { manager.registerServiceInfoCallback(info, mainExecutor, callback) }
+            catch (_: Exception) { tracking.remove(info.serviceName); entries.fail(ticket) }
         }
         fun resolveNext() {
             if (finished || resolving) return
-            while (queue.isNotEmpty() && queue.peek().serviceName in lost) queue.remove()
+            while (queue.isNotEmpty() && entries.ticket(queue.peek().serviceName) == null) queue.remove()
             if (queue.isEmpty()) { completeIfReady(); return }
             val item = queue.remove()
+            val ticket = entries.ticket(item.serviceName) ?: return
             resolving = true
             try {
                 manager.resolveService(item, object : NsdManager.ResolveListener {
                     override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) { main.post {
                         if (finished) return@post
                         resolving = false
-                        if (item.serviceName !in lost) resolutionFailed = true
+                        entries.fail(ticket)
                         resolveNext()
                     } }
                     override fun onServiceResolved(info: NsdServiceInfo) { main.post {
                         if (finished) return@post
                         resolving = false
-                        if (item.serviceName !in lost) {
-                            val hosts = if (Build.VERSION.SDK_INT >= 34) info.hostAddresses else listOfNotNull(info.host)
-                            resolved[item.serviceName] = mapOf("name" to info.serviceName,
-                                "type" to info.serviceType, "port" to info.port,
-                                "addresses" to hosts.mapNotNull { it.hostAddress?.substringBefore('%') })
-                        }
+                        entries.update(ticket, snapshot(info))
                         resolveNext()
                     } }
                 })
@@ -106,14 +141,18 @@ internal class AdbConnectDiscovery(context: Context) {
             override fun onServiceFound(info: NsdServiceInfo) { main.post {
                 val type = info.serviceType.lowercase(java.util.Locale.ROOT).trim('.').removeSuffix(".local")
                 if (finished || windowEnded || type != TYPE) return@post
-                lost.remove(info.serviceName)
-                if (!known.add(info.serviceName)) return@post
-                ZeppDiagnostics.record("NSD_DISCOVERY_FOUND", "count=${known.size}")
-                if (known.size > 32) { finish("ADB_DISCOVERY_AMBIGUOUS"); return@post }
-                queue.add(info); resolveNext()
+                val ticket = entries.found(info.serviceName) ?: return@post
+                ZeppDiagnostics.record("NSD_DISCOVERY_FOUND", "count=${entries.size}")
+                if (entries.size > 32) { finish("ADB_DISCOVERY_AMBIGUOUS"); return@post }
+                if (Build.VERSION.SDK_INT >= 34) track(info, ticket)
+                else { queue.add(info); resolveNext() }
             } }
             override fun onServiceLost(info: NsdServiceInfo) { main.post {
-                lost.add(info.serviceName); resolved.remove(info.serviceName); known.remove(info.serviceName)
+                entries.lost(info.serviceName)
+                if (Build.VERSION.SDK_INT >= 34) {
+                    tracking.remove(info.serviceName)?.let { runCatching { manager.unregisterServiceInfoCallback(it) } }
+                }
+                completeIfReady()
             } }
             override fun onDiscoveryStopped(type: String) { main.post {
                 stopped = true
@@ -126,6 +165,8 @@ internal class AdbConnectDiscovery(context: Context) {
         try { manager.discoverServices(TYPE, NsdManager.PROTOCOL_DNS_SD, listener) }
         catch (_: Exception) { finish("ADB_DISCOVERY_FAILED") }
     }
+
+    private val mainExecutor = java.util.concurrent.Executor { command -> main.post(command) }
 
     companion object { const val TYPE = "_adb-tls-connect._tcp" }
 }

@@ -1,0 +1,13 @@
+Zepp web-login interoperability adapted from:
+https://github.com/dreeveapp/dreeve-zepp-connector
+src/dreeve_zepp_connector/zepp_client.py (_web_login), AGPL-3.0
+Source blob: 74229fa75eef0e44c2e2e0b5592829a54ce06052
+The reference credits effectpears/zepp-downloader (zepp_app_token.py).
+
+SyncBeat's Dart adaptation retrieves only the selected watch's pairing key.
+It does not include activity export, token caching, mobile-login fallback,
+automatic retries or server logout. Password and account tokens are not stored.
+The GNU Affero General Public License version 3 is included in AGPL-3.0.txt.
+
+The device-request header conventions are also derived from the MIT-licensed
+huami-token; see huami-token-LICENSE.txt.

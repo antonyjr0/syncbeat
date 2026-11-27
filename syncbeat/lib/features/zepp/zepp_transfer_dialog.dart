@@ -6,6 +6,8 @@ import 'embedded_adb_setup.dart';
 
 import '../audio_sources/public_audio_storage.dart';
 import 'zepp_client.dart';
+import 'zepp_account.dart';
+import 'zepp_account_dialog.dart';
 import 'zepp_diagnostics.dart';
 
 /// Finestra di dialogo, aperta dall'elenco "MP3 locali" gia' esistente, per
@@ -39,10 +41,12 @@ class ZeppTransferDialog extends StatefulWidget {
     this.client = const ZeppClient(),
     this.events,
     this.configureOnly = false,
+    this.account,
   });
   final PublishedAudio file;
   final ZeppClient client;
   final bool configureOnly;
+  final ZeppAccount? account;
 
   /// Sostituibile nei test; di norma arriva dal canale Android.
   final Stream<ZeppEvent>? events;
@@ -309,6 +313,69 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog>
       if (mounted) setState(() => _busy = false);
     }
   }
+
+  Future<void> _recoverAccountKey() async {
+    final device = _device;
+    if (_busy || device == null) return;
+    setState(() {
+      _busy = true;
+      _status = null;
+      _failed = false;
+    });
+    try {
+      final key = await showZeppAccountRecovery(
+        context,
+        device: device,
+        account: widget.account ?? ZeppAccount(),
+      );
+      if (!mounted || key == null) return;
+      if (!isValidZeppKey(key)) {
+        throw const ZeppException('Chiave Zepp non compatibile.');
+      }
+      final previousKey = await widget.client.savedKey(device);
+      if (!mounted) return;
+      if (previousKey != null && isValidZeppKey(previousKey)) {
+        final normalizedPrevious = previousKey
+            .trim()
+            .replaceFirst(RegExp(r'^0[xX]'), '')
+            .toLowerCase();
+        zeppDiagnostic(
+          normalizedPrevious == key.toLowerCase()
+              ? 'ACCOUNT_KEY_MATCHES_SAVED'
+              : 'ACCOUNT_KEY_DIFFERS_SAVED',
+        );
+      }
+      await widget.client.rememberKey(device, key);
+      zeppDiagnostic('ACCOUNT_KEY_SAVED');
+      if (!mounted) return;
+      setState(() {
+        _hasSavedKey = true;
+        _key.clear();
+        _status =
+            'Chiave recuperata e salvata per questo orologio. Nessun brano inviato.';
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _failed = true;
+          _status = error is ZeppException
+              ? error.message
+              : 'Impossibile salvare la chiave nell’archivio sicuro. Riprova.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Widget _accountRecoveryButton() => OutlinedButton.icon(
+    key: const Key('zepp-account-connect'),
+    onPressed: _busy || _device == null ? null : _recoverAccountKey,
+    icon: const Icon(Icons.account_circle_outlined),
+    label: Text(
+      _hasSavedKey ? 'Recupera nuovamente da Zepp' : 'Collega account Zepp',
+    ),
+  );
 
   Future<void> _saveDownloadConfiguration() async {
     final device = _device;
@@ -612,6 +679,8 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog>
         onChanged: _busy ? null : _selectDevice,
       ),
       const SizedBox(height: 12),
+      _accountRecoveryButton(),
+      const SizedBox(height: 8),
       TextField(
         controller: _key,
         enabled: !_busy,
@@ -746,6 +815,7 @@ class _ZeppTransferDialogState extends State<ZeppTransferDialog>
           ),
         ],
         const SizedBox(height: 12),
+        _accountRecoveryButton(),
         TextFormField(
           key: const Key('zepp-key'),
           controller: _key,

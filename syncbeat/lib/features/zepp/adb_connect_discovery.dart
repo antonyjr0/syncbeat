@@ -48,7 +48,11 @@ int selectSelfAdbConnectPort(Map<Object?, Object?> snapshot) {
     if (type is! String ||
         normalizeAdbServiceType(type) != adbConnectServiceType ||
         name is! String ||
-        !RegExp(r'^adb-[A-Za-z0-9_.-]+$').hasMatch(name) ||
+        // Android may append a DNS-SD collision suffix. Excluding it can
+        // falsely leave one stale, unsuffixed advertisement as the sole match.
+        !RegExp(
+          r'^adb-[A-Za-z0-9_.-]+(?: \((?:[2-9]|[1-9][0-9]+)\))?$',
+        ).hasMatch(name) ||
         port is! int ||
         port < 1 ||
         port > 65535 ||
@@ -71,7 +75,8 @@ int selectSelfAdbConnectPort(Map<Object?, Object?> snapshot) {
           : 'ADB_DISCOVERY_AMBIGUOUS',
       candidates.isEmpty
           ? 'Debug wireless di questo telefono non trovato. Attiva Wi-Fi e Debug wireless e autorizza SyncBeat la prima volta.'
-          : 'Più servizi Debug wireless locali: collegamento interrotto per evitare una scelta ambigua.',
+          : 'Android annuncia più porte Debug wireless per questo telefono. '
+                'La porta attuale non è identificabile con certezza; collegamento interrotto.',
     );
   }
   return candidates.values.single;

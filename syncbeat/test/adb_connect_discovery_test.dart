@@ -71,6 +71,28 @@ void main() {
       );
     }
   });
+  test('accepts Android DNS-SD collision suffixes as local candidates', () {
+    for (final suffix in [2, 9, 10, 19, 20, 101]) {
+      expect(
+        selectSelfAdbConnectPort(
+          snapshot([service(name: 'adb-self-connect ($suffix)')]),
+        ),
+        43210,
+      );
+    }
+  });
+  test('does not silently prefer an old unsuffixed advertisement', () {
+    expect(
+      () => selectSelfAdbConnectPort(
+        snapshot([
+          service(),
+          service(name: 'adb-self-connect (2)', port: 43211),
+          service(name: 'adb-self-connect (3)', port: 43212),
+        ]),
+      ),
+      throwsA(code('ADB_DISCOVERY_AMBIGUOUS')),
+    );
+  });
   test(
     'loopback, remote, malformed and out-of-range services are not candidates',
     () {
@@ -80,6 +102,10 @@ void main() {
         service(host: '0.0.0.0'),
         service(host: '192.0.2.2'),
         service(name: 'unrelated'),
+        service(name: 'adb-self-connect (0)'),
+        service(name: 'adb-self-connect (1)'),
+        service(name: 'adb-self-connect (02)'),
+        service(name: 'adb-self-connect (2) extra'),
         service(type: '_adb._tcp'),
         service(port: 0),
         service(port: 65536),

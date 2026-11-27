@@ -292,3 +292,344 @@ Durante la revisione l’utente ha avviato autonomamente un trasferimento MP3 ne
 Dopo il completamento, tutti i permessi Zepp e i flag coincidevano nuovamente con la baseline; il registro conteneva soltanto `lease.lock`. È stato quindi installato l’APK finale. `WRITE_SECURE_SETTINGS` è rimasto `granted=true` attraverso l’aggiornamento, senza ripetere la concessione dal PC. Le evidenze della revisione e dell’operazione sono in `tools/zepp-transfer/pre-main/`, escluse da Git.
 
 L’apertura dell’APK finale ha registrato `ADB_WIFI_ALREADY_ENABLED` alle 14:56:39.903 e `APP_PREPARATION_READY` alle 14:56:45.321, senza alcun `ADB_GRANT_REQUEST`. Il percorso di preparazione funziona quindi anche dopo l’aggiornamento e riusa il privilegio concesso dal telefono. Nel processo del trasferimento era stato osservato un download alle 14:52:12, precedente all’invio; la traccia del trasferimento rimane distinta dalla conferma di riproduzione sul lettore dell’orologio.
+
+## Modifiche apportate, 24 novembre 2026: recupero chiave dall’account Zepp
+
+L’utente ha chiesto di verificare la fattibilità del recupero guidato e integrarlo
+se praticabile. È stato verificato il codice pubblico MIT huami-token e il
+corrispondente scambio Android di AmazToken. È stata integrata un’azione esplicita
+**Collega account Zepp** nella configurazione esistente, compresa quella aperta
+dal download. Il recupero usa email/password direttamente verso HTTPS Zepp e
+salva solo l’`auth_key` corrispondente all’intero indirizzo dell’orologio scelto,
+senza mostrare la chiave, persistere credenziali, modificare musica/permessi o
+avviare invii. Resta l’inserimento manuale. Endpoint e autenticazione non sono
+un’interfaccia pubblica garantita dal produttore; accessi social e verifiche
+aggiuntive non sono implementati.
+
+Superati **214 test Flutter e 56 test JVM**, analisi statica pulita e compilazione
+release. Il nuovo APK è stato installato (`Success`) e conserva il privilegio
+Android già concesso. Il recupero reale non è ancora provato: l’utente non ricorda
+il metodo di accesso e deve inserire le proprie credenziali sul telefono. Non
+sono state chieste password in chat né eseguiti accessi per suo conto.
+
+L’apertura ha inoltre rilevato un errore nel collegamento ADB dopo la selezione
+di un unico candidato locale: `ADB_DISCOVERY_SELECTED`, `ADB_AUTO_CONNECT_ERROR`,
+`APP_PREPARATION_ERROR`. Non è un successo del bootstrap e non va confuso con i
+checkpoint precedenti riusciti. La modifica account non cambia quel percorso e
+non lo usa per recuperare la chiave; la causa del nuovo esito resta da chiarire.
+Dettagli e checkpoint in [fattibilità account](zepp-account-fattibilita.md).
+
+## Verifica sul telefono, 24 novembre 2026: chiave Zepp recuperata
+
+Dopo la prova richiesta l’utente ha comunicato **fatto**. I log del processo
+PID 30294 confermano `ACCOUNT_TOKENS_OK`, `ACCOUNT_LOGIN_OK`,
+`ACCOUNT_KEY_MATCHED`, `ACCOUNT_LOGOUT_OK`, `ACCOUNT_KEY_MATCHES_SAVED` e
+`ACCOUNT_KEY_SAVED`, in circa 5,14 secondi complessivi. Il recupero ha quindi
+restituito la stessa chiave valida già usata per questo orologio, ha chiuso
+correttamente la sessione temporanea e ha completato il salvataggio sicuro.
+Sono state lette solo queste fasi: nessuna credenziale o chiave è stata esposta.
+Questo esito supera il precedente checkpoint pendente del recupero account,
+senza estenderlo ad altri dispositivi o account. Nessun invio è stato avviato.
+
+È stato chiesto un ultimo controllo della sincronizzazione nell’app Zepp. La
+conferma dell’utente è pendente. Nella stessa apertura il collegamento ADB ha
+ancora riportato `APP_PREPARATION_ERROR` prima del recupero HTTPS: questo errore
+rimane aperto e non è risolto dal successo del recupero chiave.
+
+## Correzione del 25 novembre 2026: logout Zepp e diagnostica della connessione
+
+L’utente ha verificato che il recupero chiave della prima build ha causato il
+logout dell’app Zepp e ha confermato l’errore ADB nella preparazione automatica.
+La prova del 24 novembre dimostrava il recupero della chiave, non la conservazione
+della sessione Zepp. È stata trovata una fonte primaria di implementazione
+(dreeve-zepp-connector) che documenta lo stesso effetto del login mobile e usa
+un login web per evitarlo. Il codice SyncBeat ora usa identità e scambio web,
+non esegue più il logout remoto e non ripiega sul login mobile. L’assenza di
+interferenza con Zepp deve ancora essere verificata da questo utente nella nuova
+build. Password e token restano soltanto in memoria.
+
+La dipendenza ADB restituiva un errore generico: ora un adattatore attorno al suo
+unico tentativo distingue rifiuto TCP, timeout, errore di rete e autenticazione
+ADB/TLS non confermata, mostrando un messaggio pertinente. Intercetta soltanto
+la stampa grezza di errore della dipendenza, registrando codici fissi. Non sono
+stati aggiunti probe, nuovi collegamenti, retry, reset di chiavi o modifiche al
+protocollo musicale. La causa del problema del telefono non è ancora risolta.
+
+I **218 test Flutter** passano, inclusi identità web per l’autenticazione, assenza
+del logout e di fallback mobile anche dopo errore, oltre a classificazione e
+singolo tentativo ADB. ADB vede al momento un telefono M2006C3LVG, diverso dallo
+Xiaomi 15T già usato: è stata chiesta conferma prima di installare o modificare
+il dispositivo. Dettagli in [recupero account](zepp-account-fattibilita.md).
+
+L’analisi statica finale è senza segnalazioni e l’APK release correttivo è stato
+compilato (177,2 MB). Non è stato installato sul telefono M2006C3LVG: la scelta
+del dispositivo di verifica è ancora da confermare. Nessun accesso account,
+concessione/revoca di permessi o invio musicale è stato eseguito sul dispositivo
+diverso. La diagnosi fisica ADB e la verifica della sessione Zepp restano pendenti.
+
+## Verifica del 25 novembre 2026: avvio sullo Xiaomi 15T corretto
+
+L’utente ha confermato che il M2006C3LVG non era il suo telefono. Al nuovo
+controllo ADB ha rilevato lo Xiaomi 15T `goya_eea`, usato per le prove precedenti.
+Il privilegio SyncBeat risultava già concesso, i tre permessi Bluetooth Zepp
+concessi e `adb_wifi_enabled=0`. Nessun invio risultava in corso. L’APK correttivo
+è stato installato (`Success`) e l’app aperta senza ripetere concessioni.
+
+Nel processo PID 11589: `ADB_WIFI_ENABLE_REQUESTED`, discovery di tre servizi con
+un solo candidato locale, `ADB_AUTO_CONNECTED`, `DIRECT_BOOTSTRAP_READY`,
+`DIRECT_BOOTSTRAP_CLOSED`, `DIRECT_STATUS_OK pid=24568`, quindi
+`APP_PREPARATION_READY`. Dall’avvio della richiesta al servizio pronto sono
+trascorsi circa **5,58 secondi**. La lettura Android ha confermato il flag passato
+da 0 a 1. Un solo tentativo, nessun invio o comando di sospensione Zepp.
+
+La preparazione automatica è dunque riuscita in questa prova sul telefono
+corretto. Il vecchio guasto non è stato riprodotto e non si attribuisce la
+risoluzione a una modifica del trasporto: l’incremento distingue gli errori ma
+non cambia porte, identità o numero dei tentativi. È stata richiesta la verifica
+separata del recupero account web e della permanenza della sessione Zepp.
+
+## Verifica del 25 novembre 2026: sessione Zepp conservata, rifiuto ADB riprodotto
+
+Il pulsante account segnalato come disabilitato dipendeva dal campo **Orologio**
+ancora senza selezione, con elenco già caricato. È stata selezionata l’unica voce
+Active 3 e l’utente ha eseguito il nuovo recupero. Nel processo PID 11589 sono
+comparsi `ACCOUNT_WEB_LOGIN_OK`, `ACCOUNT_KEY_MATCHED`,
+`ACCOUNT_KEY_MATCHES_SAVED` e `ACCOUNT_KEY_SAVED`, circa 0,57 secondi dall’avvio.
+La chiave coincide con quella funzionante; nessun valore è stato esposto.
+L’utente ha poi confermato **«Sì, sincronizza senza nuovo accesso»** in Zepp.
+Il checkpoint della correzione del logout è dunque superato su questo account.
+
+Il problema ADB si è invece ripresentato nelle riaperture: candidato unico
+selezionato e `ADB_CONNECT_REFUSED` prima di `APP_PREPARATION_ERROR`, anche con
+flag già attivo. La prima apertura riuscita non dimostra la risoluzione del
+difetto. Ora il rifiuto TCP è distinto da timeout e problemi di autenticazione;
+non prova che manchi il privilegio Android o che il pairing vada rifatto.
+La presenza di più pubblicazioni del telefono con porte diverse nella discovery
+del PC rende da verificare una possibile pubblicazione obsoleta. La causa non è
+ancora dimostrata. Nessun retry, reset, invio o modifica del protocollo musicale
+è stato introdotto durante questo checkpoint.
+
+## Intervento del 25 novembre 2026: ricerca aggiornata e causa TLS individuata
+
+Su richiesta esplicita di risolvere il problema ADB è stata mantenuta una sola
+connessione per apertura/gesto e nessuna modifica al protocollo musicale.
+
+**Discovery.** Su Android 14+ la risoluzione singola è stata sostituita da
+`NsdManager.registerServiceInfoCallback`: durante la finestra di ricerca gli
+aggiornamenti sostituiscono la porta precedente e le perdite invalidano il dato.
+Android 11–13 mantiene la risoluzione compatibile. `AdbDiscoveryEntries` usa
+generazioni per impedire che una callback tardiva resusciti una pubblicazione
+persa; la fine della ricerca rimuove tutte le registrazioni. Restano i controlli
+sul telefono locale e sull’unicità del candidato, il collegamento a localhost e
+le finestre di 5/10/12 secondi già usate. Non sono stati aggiunti probe o retry
+al percorso applicativo. Fonte API:
+https://developer.android.com/reference/android/net/nsd/NsdManager .
+
+**Verifica della causa.** Una pubblicazione obsoleta era un’ipotesi iniziale e la
+sola modifica della discovery non ha risolto tutti gli avvii. Tramite USB è stata
+confrontata privatamente la porta indicata dalle impostazioni con il servizio
+Android; un unico controllo TCP diagnostico su quella porta ha confermato che
+localhost rispondeva. Un helper temporaneo `app_process`, non incluso nell’APK,
+ha letto soltanto porta e conteggi dal servizio Android, senza concessioni o
+modifiche al servizio. Non sono stati letti o mostrati valori di chiavi.
+
+La libreria nascondeva l’errore arrivato *dopo* il completamento iniziale TLS.
+Una variante temporanea, confinata in `.dart_tool`, ha emesso esclusivamente
+codici di fase, senza abilitare il verbose o registrare pacchetti. Nel processo
+PID 8845 sono stati osservati `TCP_CONNECTED`, `ADB_STLS_RECEIVED`,
+`TLS_CONTEXT_READY`, `TLS_ESTABLISHED`, `TLS_SOCKET_ERROR`, quindi
+**`TLS_CERTIFICATE_UNKNOWN`** e chiusura del canale. L’app riceveva infine
+`ADB_HANDSHAKE_REJECTED`. Questo avvio ha raggiunto la porta e avviato TLS:
+Android non ha riconosciuto il certificato del client come autorizzato.
+Non è stato dimostrato quando o perché quell’autorizzazione abbia cessato di
+essere valida; non va confusa con `WRITE_SECURE_SETTINGS`, che resta concesso.
+Riferimento del controllo dei client in adbd:
+https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/master/daemon/auth.cpp .
+
+**Ripristino preparato.** Il messaggio di autenticazione indica ora
+**Configura collegamento → Abbina dalla notifica**. È stato chiesto all’utente
+di ripristinare una volta l’abbinamento inserendo il codice direttamente nella
+notifica; il codice non viene chiesto in chat. Non sono stati revocati altri
+host, cancellate le chiavi dell’app o disattivati i timeout di sicurezza Android.
+La verifica dopo questo passaggio resta pendente.
+
+**Build definitiva.** La variante diagnostica e l’override sono stati rimossi:
+la configurazione dei pacchetti torna a `flutter_adb 1.0.0` originale e nel
+binario finale non compare il marcatore diagnostico temporaneo. Superati
+**218 test Flutter e 61 test JVM**, analisi statica senza segnalazioni e build
+release. L’APK definitivo è stato installato sullo Xiaomi 15T con `Success`.
+Nessun invio musicale o test di revoca/ripristino Zepp è stato avviato.
+
+## Verifica dopo il nuovo abbinamento, 25 novembre 2026
+
+L’utente ha confermato l’abbinamento dalla notifica. Nel processo PID 10543
+sono poi comparsi `ADB_AUTO_CONNECTED`, `DIRECT_BOOTSTRAP_READY`,
+`DIRECT_BOOTSTRAP_CLOSED`, `DIRECT_STATUS_OK pid=15123` e
+`APP_PREPARATION_READY`: l’autenticazione TLS è tornata funzionante senza
+cancellare l’identità dell’app o modificare il privilegio Android.
+
+Sono riusciti due avvii da processo chiuso: Debug wireless già attivo
+(PID 12492) e attivazione automatica da flag spento (PID 14458). Ciascuno
+ha effettuato una sola discovery, una connessione autenticata e una richiesta
+di stato, senza musica o sospensione dei permessi Zepp.
+
+**Riapertura ancora difettosa.** Nello stesso processo PID 14458, dopo il
+passaggio alle impostazioni e lo spegnimento del Debug wireless, il ritorno
+nell’app ha riattivato il flag ma ha selezionato una porta chiusa, con
+`ADB_CONNECT_REFUSED`. Il successo dei due avvii precedenti non chiude quindi
+il difetto automatico.
+
+I controlli USB, esterni all’APK, hanno dimostrato quattro pubblicazioni locali
+con lo stesso nome base: una sola porta corrisponde al servizio Android attuale.
+Quella attuale porta un suffisso DNS-SD ` (N)`, mentre il vecchio filtro Dart
+accettava soltanto il nome senza suffisso. Anche una richiesta mDNS diretta
+ha ricevuto le quattro pubblicazioni: aggiornare le callback o attendere una
+nuova risposta non basta a distinguerle. Nessuna scansione di porte o prova
+TCP multipla è stata aggiunta nell’app.
+
+**Correzione del filtro.** I suffissi Android sono ora inclusi tra i candidati.
+Con più pubblicazioni l’app restituisce `ADB_DISCOVERY_AMBIGUOUS` prima di
+aprire il socket, invece di scegliere erroneamente l’unico nome senza suffisso.
+Due regressioni verificano il nome rinominato e la coesistenza con annunci
+precedenti. Il messaggio spiega che Android annuncia più porte e che non è
+possibile identificare con certezza quella attuale. Non viene scelto il suffisso
+numericamente maggiore e non viene provata la porta salvata.
+
+Un riavvio del solo servizio ADB via USB ha eliminato le vecchie pubblicazioni
+e l’avvio successivo (PID 15885) è riuscito con una connessione e uno stato.
+La riapertura dopo un nuovo spegnimento ha però riprodotto l’ambiguità, anche
+attendendo prima la conferma dal servizio Android della porta non disponibile
+(circa 1,16 secondi). Il riavvio del servizio è stato un controllo diagnostico
+dal PC, **non una soluzione implementata nell’app**.
+
+La build release con il filtro corretto è stata installata con `Success`.
+**220 test Flutter superati**, analisi senza segnalazioni; restano validi i
+61 test JVM della modifica nativa già verificata. Dipendenza originale
+`flutter_adb 1.0.0`, nessuna variante diagnostica nel pacchetto.
+Il pairing è verificato; la preparazione automatica dopo cambio della porta
+resta aperta e non è dichiarata risolta. Una verifica dopo riavvio completo
+Android resta da eseguire.
+
+## Prova del flusso da prima installazione: preparazione, 25 novembre 2026
+
+L’utente propone una prova senza dati SyncBeat preesistenti prima di proseguire
+gli sviluppi. La prova è preparata, **non ancora eseguita**: nessun dato è stato
+cancellato per questa richiesta. Prima si conclude il checkpoint ADB dopo il
+riavvio, conservando lo stato utile alla diagnosi.
+
+Il punto di partenza dovrà avere archivio sicuro, preferenze e cache SyncBeat
+vuoti, nuova identità ADB senza abbinamento precedente e autorizzazione
+`WRITE_SECURE_SETTINGS` assente. Nessun trasferimento o ripristino dei permessi
+Zepp deve risultare pendente prima del reset. Una semplice reinstallazione
+con aggiornamento non costituisce questa prova.
+
+L’azzeramento dei dati dell’app elimina anche eventuali file nello staging
+privato: prima di proporlo come azione finale occorre identificare i file da
+conservare e verificarne una copia accessibile fuori dai dati privati.
+Non si cancellano sorgenti musicali, file nei Download, dati/account di Zepp
+o abbinamento Bluetooth dell’orologio. Le vecchie autorizzazioni ADB di altri
+host, incluso il PC diagnostico, non vanno revocate. La nuova identità dell’app
+deve comunque richiedere il proprio primo abbinamento.
+
+Checkpoint nell’ordine:
+
+1. **Primo avvio e collegamento.** Dalle normali schermate dell’app, attivazione
+   manuale iniziale del Debug wireless, abbinamento dalla notifica, scoperta
+   della porta e concessione facoltativa guidata del collegamento automatico.
+   Nessun inserimento manuale della porta né concessione dal PC per superare
+   un blocco del percorso utente.
+2. **Configurazione orologio.** Permessi Bluetooth, scelta dell’orologio e
+   recupero della chiave tramite accesso web. Nessun riuso della chiave salvata.
+   Confermare che Zepp resti autenticata e sincronizzi.
+3. **Riaperture.** Preparazione all’apertura con debug già attivo, poi dopo
+   spegnimento del debug e dopo riavvio del telefono. Una sola connessione
+   per gesto; nessun trasferimento o sospensione durante la preparazione.
+4. **Sospensione e ripristino senza file.** Eseguire soltanto dopo i checkpoint
+   precedenti e verificare il ritorno effettivo dei permessi Zepp.
+5. **Download e invio esplicito.** Scaricare un file autorizzato, inviarlo dalla
+   schermata Download con il normale pulsante e verificare riproduzione
+   sull’orologio e successiva sincronizzazione Zepp. Nessun invio automatico.
+
+Per ogni checkpoint si annotano passaggi visibili, esito e punti che richiedono
+assistenza tecnica. L’agente legge log e risultati; all’utente restano accesso
+account, codice Android, sblocco e ascolto sull’orologio. Un blocco non viene
+aggirato con configurazioni manuali dal PC: si corregge e si ripete il relativo
+checkpoint prima di passare agli sviluppi successivi. La prova di invio senza
+Wi-Fi resta un incremento separato, non già implementato.
+
+## Causa delle pubblicazioni obsolete e correzione verificata, 25 novembre 2026
+
+La diagnosi successiva supera l’ipotesi di un problema non distinguibile della
+sola discovery. Con SyncBeat ferma, spegnimento e riattivazione lasciano un solo
+servizio corrente. Dopo il bootstrap B1, la stessa sequenza ne lascia due;
+quello vecchio scompare alla chiusura del processo dell’app e del relativo
+servizio locale.
+
+**Risorsa ereditata.** Sul telefono, `app_process` riceve da adbd un descrittore
+di socket Unix senza `CLOEXEC`, collegato a `/dev/socket/mdnsd`. Il processo B1
+persistente tratteneva questa copia: la chiusura del riferimento di adbd non
+liberava quindi la vecchia pubblicazione. Un processo diagnostico separato ha
+riprodotto due servizi mantenendo il descrittore e un solo servizio corrente
+chiudendo quella copia. La shell diagnostica deve usare `exec`, come il bootstrap
+reale, perché anche una shell intermedia in attesa può trattenere una copia.
+Questi controlli non aprono connessioni TCP né leggono chiavi.
+
+**Implementazione.** `InheritedAdbResources` viene chiamato all’ingresso di
+`ZeppAdbLeaseServer.main`, dopo il controllo UID shell/root e prima di entrambi
+i percorsi persistenti. Esclude stdin/stdout/stderr e descrittori con
+`O_CLOEXEC`; per gli altri verifica su una copia temporanea che il peer sia
+esattamente `/dev/socket/mdnsd`. Chiude esclusivamente il descrittore ereditato
+del figlio, senza `shutdown` del socket condiviso con adbd. Non vengono chiusi
+socket creati dal servizio o risorse ART. L’ispezione del peer usa il getter
+framework `UnixSocketAddress.getSunPath` nel solo processo shell, senza nuovi
+privilegi dell’app o accessi al gestore ADB. Errori di chiusura non vengono
+ignorati prima di annunciare READY. Il marcatore registra solo
+`BOOTSTRAP_INHERITED_MDNS_CLOSED count=N`.
+
+Il controllo dei flag usa `O_CLOEXEC` per `/proc/self/fdinfo`, distinto da
+`FD_CLOEXEC` di `fcntl`. L’ispezione usa `ParcelFileDescriptor.fromFd`: adottare
+un descrittore gestito da ART può causare un abort fdsan. Un primo helper
+diagnostico, esterno all’APK, è terminato proprio per quel controllo; è stato
+corretto prima dell’implementazione e non ha modificato dati o l’app installata.
+
+**Interferenza dell’installazione USB.** Dopo `adb install -r` completato con
+`Success`, anche il bridge persistente di sistema `abb` conservava un socket
+ereditato e impediva il primo avvio del test. È stato identificato e chiuso una
+sola volta, verificando prima processo e nome. Non è un’azione eseguita dall’app.
+Tutti i cicli seguenti sono avvenuti senza altri riavvii di ADB o pulizie dal PC.
+La correzione riguarda le risorse dei processi avviati da SyncBeat; non forza la
+chiusura di risorse appartenenti ad altri processi ADB. Il filtro delle ambiguità
+resta attivo.
+
+**Verifiche della release installata.**
+
+- Primo avvio PID 24846 e successiva riapertura con cambio di porta: pronti;
+  dopo la riapertura un solo servizio, corrispondente alla porta Android.
+- Avvio PID 28109 con debug acceso e due ulteriori spegnimenti/riaperture:
+  tutti pronti con una discovery e una connessione autenticata per gesto.
+  Nei due cambi restano identici il processo dell’app e il PID del servizio
+  diretto: B1 sopravvive e viene riusato, senza un nuovo bootstrap.
+- Riapertura già pronta: nessuna nuova discovery o connessione.
+- Avvio PID 28305 con debug spento: `ADB_WIFI_ENABLE_REQUESTED`,
+  `ADB_AUTO_CONNECTED`, bootstrap READY/chiusura shell, stato diretto del
+  servizio PID 32052 e `APP_PREPARATION_READY`. Un solo servizio corrente.
+- I tre bootstrap finali hanno registrato ciascuno la chiusura di una risorsa
+  mDNS ereditata. I permessi Bluetooth Zepp risultano ancora tutti concessi e
+  `WRITE_SECURE_SETTINGS` resta concesso a SyncBeat.
+
+**65 test JVM superati**, inclusi quattro nuovi controlli di selezione delle
+risorse, mancata doppia chiusura, propagazione dell’errore e corretta maschera
+dei flag. Analisi statica pulita e build release riuscita. Resta valida la suite
+Flutter da 220 test della modifica precedente, senza altre modifiche Dart in
+questo intervento. APK installato con `Success`.
+
+Il guasto riprodotto nei cambi di porta dell’app è quindi corretto e verificato
+su questo telefono. Non sono stati cambiati protocollo musicale, comandi di
+sospensione/ripristino, identità ADB o numero di tentativi. Nessun invio è stato
+eseguito. L’utente ha successivamente confermato che le ultime prove sono
+avvenute dopo il suo riavvio completo del telefono: è quindi verificato anche
+il funzionamento dopo riavvio, con pairing e privilegio Android conservati.
+La preparazione è avvenuta aprendo l’app; non è una prova di avvio automatico
+al boot. Resta la prova da prima installazione proposta dall’utente; nessun
+dato è stato azzerato. Questa conferma supera le precedenti note di verifica
+pendente dopo il riavvio.

@@ -13,6 +13,7 @@ import 'zepp_adb_stream.dart';
 import 'zepp_diagnostics.dart';
 import 'zepp_direct_status.dart';
 import 'adb_connect_discovery.dart';
+import 'adb_connection_attempt.dart';
 
 Map<String, String> _generateAdbIdentity() =>
     AdbCrypto(adbKeyName: 'SyncBeat@self').exportKeyPairForStorage();
@@ -281,12 +282,10 @@ class EmbeddedAdb {
     _connection = connection;
     _nextStreamId = 0;
     try {
-      if (!await connection.connect().timeout(const Duration(seconds: 12)) ||
-          !connection.tlsEnabled) {
-        throw StateError(
-          'Connessione al debug wireless non riuscita. Controlla la porta di connessione.',
-        );
-      }
+      await attemptAdbConnection(
+        connect: connection.connect,
+        tlsEnabled: () => connection.tlsEnabled,
+      );
       _port = port;
       await _storage.write(key: 'embedded_adb_port_v1', value: '$port');
     } catch (_) {
@@ -360,7 +359,9 @@ class EmbeddedAdb {
           ? error.code
           : null;
       if (code != null &&
-          RegExp(r'^ADB_(DISCOVERY|WIFI)_[A-Z_]+$').hasMatch(code)) {
+          RegExp(
+            r'^ADB_(DISCOVERY|WIFI|CONNECT|HANDSHAKE|TLS)_[A-Z_]+$',
+          ).hasMatch(code)) {
         zeppDiagnostic(code);
       }
       rethrow;
@@ -418,11 +419,12 @@ class EmbeddedAdb {
       startupStatus.value =
           'Collegamento preparato. Per inviare un brano premi Invia all’orologio.';
       zeppDiagnostic('APP_PREPARATION_READY');
-    } catch (_) {
+    } catch (error) {
       startupFailed.value = true;
-      startupStatus.value =
-          'Preparazione non riuscita. Controlla Wi-Fi e Debug wireless. '
-          'La prima volta autorizza SyncBeat dalla configurazione.';
+      startupStatus.value = error is ZeppBootstrapException
+          ? error.message
+          : 'Preparazione non riuscita. Controlla Wi-Fi e Debug wireless. '
+                'La prima volta autorizza SyncBeat dalla configurazione.';
       zeppDiagnostic('APP_PREPARATION_ERROR');
       rethrow;
     }

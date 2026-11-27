@@ -99,8 +99,16 @@ il resto del progetto. Non serve altro.
    associata al singolo orologio, e riutilizzata senza mostrarla nel campo.
    **Dimentica chiave salvata** la cancella; per sostituirla inseriscine una nuova.
    Se non hai la chiave, puoi
-   leggere la finestra ma **fermati qui**: il recupero sicuro della chiave e' una
-   fase separata, non automatica.
+   usare **Collega account Zepp** per il recupero sperimentale con email/password
+   Zepp; richiede una verifica reale sul proprio account. Vedi
+   [fattibilità e limiti](zepp-account-fattibilita.md). In alternativa puoi
+   inserire una chiave già disponibile.
+
+   Se il collegamento ADB segnala **Autenticazione ADB/TLS non confermata**,
+   apri **Configura collegamento → Abbina dalla notifica** e completa una volta
+   l’abbinamento Android. La concessione per attivare Debug wireless e la fiducia
+   nella chiave ADB sono autorizzazioni distinte: la prima non sostituisce la
+   seconda. Il ripristino non richiede di dissociare l’orologio da Zepp.
 6. **3. Verifica collegamento (non invia)**: si connette, autentica e legge le
    capacita'. Non manda musica.
 7. Solo se vedi *Autenticazione riuscita e servizio music presente*, premi
@@ -314,6 +322,18 @@ Il download da solo non invia musica. Dopo il salvataggio nel popup YouTube o Ja
 All’avvio di SyncBeat su Android, e quando la riapri dopo averla lasciata in background, l’app cerca il servizio di connessione Debug wireless di questo telefono tramite Android NSD. Individua la porta corrente, effettua un solo collegamento autenticato e prepara il canale locale B1 senza inviare musica né sospendere permessi. Se il collegamento è già pronto lo riusa. La schermata iniziale mostra preparazione, disponibilità o errore. Non ci sono riconnessioni periodiche dopo un errore.
 
 La ricerca usa soltanto `_adb-tls-connect._tcp`, distinto dal servizio di pairing. Un candidato deve avere un nome ADB valido e risolversi a un indirizzo locale assegnato a questo telefono; la connessione usa comunque `127.0.0.1`. Se i candidati sono assenti o ambigui, l’app si ferma. La porta salvata non viene provata come secondo tentativo. La ricerca osserva i servizi per 5 secondi, con un limite complessivo nativo di 10 secondi, da verificare nelle condizioni reali della rete.
+
+Sono accettati anche i suffissi DNS-SD aggiunti da Android, come ` (2)`.
+Se Android mantiene contemporaneamente annunci di porte precedenti, l’app
+segnala più porte locali e si ferma prima del collegamento. Il 25 novembre è
+stata individuata e corretta una risorsa mDNS ereditata dal servizio locale di
+SyncBeat che tratteneva la vecchia pubblicazione. La release aggiornata ha
+superato avvii con debug acceso o spento e tre riaperture con cambio di porta,
+sempre con una sola connessione per gesto e riuso del servizio locale B1.
+L’utente ha confermato che queste ultime prove sono avvenute dopo il riavvio
+completo del telefono: il funzionamento alla successiva apertura dell’app,
+con pairing e privilegio conservati, è quindi verificato. Resta da eseguire
+la prova da prima installazione.
 
 Il 24 novembre 2026 la preparazione automatica è riuscita sul telefono HyperOS: all’apertura, con Wi-Fi e Debug wireless attivi, SyncBeat ha selezionato il solo servizio locale valido e preparato il canale autenticato in circa sei secondi, senza inserire la porta o premere comandi di preparazione. I permessi Zepp sono rimasti invariati. Questo esito riguarda la preparazione, senza musica o cicli di sospensione.
 

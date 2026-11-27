@@ -102,11 +102,13 @@ class _EmbeddedAdbSetupState extends State<EmbeddedAdbSetup> {
           _message = error.message ?? 'Operazione non riuscita.';
         });
       }
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
         setState(() {
           _connectionError = connecting;
-          _message = !connecting
+          _message = error is ZeppBootstrapException
+              ? error.message
+              : !connecting
               ? 'Abbinamento non riuscito. Riprova con un nuovo codice.'
               : 'Connessione automatica non riuscita. Controlla Wi-Fi e Debug wireless. Puoi usare la porta manuale come recupero.';
         });

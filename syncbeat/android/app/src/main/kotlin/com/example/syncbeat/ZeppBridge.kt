@@ -161,7 +161,7 @@ class ZeppBridge(private val activity: Activity, private val publicAudio: Public
             }
             "cancel" -> { ZeppDiagnostics.record("BRIDGE_CANCEL"); cancelled.set(true); bleProbe?.cancel(); closeSocket(); result.success(null) }
             "licenses" -> result.success(
-                listOf("AGPL-3.0.txt", "tiny-ECDH-LICENSE.txt", "THIRD_PARTY_NOTICES.md", "flutter_adb-LICENSE.txt").joinToString("\n\n") { name ->
+                listOf("AGPL-3.0.txt", "tiny-ECDH-LICENSE.txt", "THIRD_PARTY_NOTICES.md", "flutter_adb-LICENSE.txt", "huami-token-LICENSE.txt", "zepp-web-login-NOTICE.txt").joinToString("\n\n") { name ->
                     activity.assets.open("licenses/zepp/$name").bufferedReader().use { it.readText() }
                 }
             )

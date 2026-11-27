@@ -10,6 +10,11 @@ import java.util.concurrent.TimeUnit
 object ZeppAdbLeaseServer {
     @JvmStatic fun main(args: Array<String>) {
         check(Process.myUid() == 2000 || Process.myUid() == 0)
+        // adbd can leave its mDNS registration fd inheritable. Holding that
+        // copy pins an obsolete advertisement across wireless-debug restarts.
+        // Release it before either persistent helper opens any own sockets.
+        val inheritedMdns = InheritedAdbResources.closeMdnsAtStartup()
+        ZeppDiagnostics.record("BOOTSTRAP_INHERITED_MDNS_CLOSED", "count=$inheritedMdns")
         if (args.contentEquals(arrayOf("--direct-status-v1"))) {
             // The launching shell disables echo before this marker. Only then
             // may Dart send the credential on stdin, never on the command line.
