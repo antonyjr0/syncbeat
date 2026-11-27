@@ -221,6 +221,7 @@ void main() {
         'stagedAt': DateTime.now().toUtc().toIso8601String(),
         'provider': candidate.providerId,
         'providerItemId': candidate.id,
+        'spotifyTrack': {'id': 'playlist-song'},
       };
       final malformed = [
         '[]',
@@ -241,6 +242,12 @@ void main() {
           });
       storage = PublicAudioStorage(supportDirectory: temp, android: true);
       expect((await storage.list()).single.name, 'valid.mp3');
+      final playlistFiles = await storage.filesForSpotifyTracks({
+        'playlist-song',
+        'missing-song',
+      });
+      expect(playlistFiles.keys, ['playlist-song']);
+      expect(playlistFiles['playlist-song']?.path, record['path']);
       expect(
         (await storage.findExistingCandidate(candidate))!.path,
         record['path'],

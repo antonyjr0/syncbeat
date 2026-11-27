@@ -16,6 +16,30 @@ import 'youtube_downloader.dart';
 import 'youtube_provider.dart';
 import 'youtube_channels.dart';
 
+Future<List<RankedYoutubeVideo>> searchYoutubeMatches({
+  required SpotifyTrack track,
+  required YoutubeTools tools,
+  required YoutubeMatcher matcher,
+  required DownloadCancellationToken token,
+  YoutubeChannelCache? channelCache,
+}) async {
+  final videos = await tools.search(track, token);
+  final cache = channelCache ?? YoutubeChannelCache.shared;
+  final enriched = await Future.wait(
+    videos.map((video) async {
+      final channel = video.channelId;
+      return video.withChannelInfo(
+        const YoutubeChannelClassifier().classify(
+          video.metadata,
+          evidence: channel == null ? null : await cache.lookup(channel),
+        ),
+      );
+    }),
+  );
+  token.throwIfCancelled();
+  return matcher.rank(track, enriched).take(10).toList();
+}
+
 class YoutubeMatchDialog extends StatefulWidget {
   const YoutubeMatchDialog({
     required this.track,
@@ -27,6 +51,8 @@ class YoutubeMatchDialog extends StatefulWidget {
     this.downloader,
     this.updateAndroidEngine,
     this.watchTransfer,
+    this.allowWatchTransfer = true,
+    this.playlistSuggestions,
     super.key,
   });
   final SpotifyTrack track;
@@ -37,6 +63,8 @@ class YoutubeMatchDialog extends StatefulWidget {
   final AudioStagingStorage? storage;
   final YoutubeDownloader? downloader;
   final ZeppDownloadTransfer? watchTransfer;
+  final bool allowWatchTransfer;
+  final List<RankedYoutubeVideo>? playlistSuggestions;
   final Future<void> Function(DownloadCancellationToken token)?
   updateAndroidEngine;
   @override
@@ -97,6 +125,7 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
   @override
   void initState() {
     super.initState();
+    _results = widget.playlistSuggestions ?? [];
     _load();
   }
 
@@ -140,29 +169,15 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
       _phase = 'Ricerca YouTube';
     });
     try {
-      final videos = await widget.tools.search(widget.track, token);
-      final cache = widget.channelCache ?? YoutubeChannelCache.shared;
-      final enriched = await Future.wait(
-        videos.map((video) async {
-          final evidence = video.channelId == null
-              ? null
-              : await cache.lookup(video.channelId!);
-          return video.withChannelInfo(
-            const YoutubeChannelClassifier().classify(
-              video.metadata,
-              evidence: evidence,
-            ),
-          );
-        }),
+      final results = await searchYoutubeMatches(
+        track: widget.track,
+        tools: widget.tools,
+        matcher: widget.matcher,
+        token: token,
+        channelCache: widget.channelCache,
       );
-      token.throwIfCancelled();
       if (mounted) {
-        setState(
-          () => _results = widget.matcher
-              .rank(widget.track, enriched)
-              .take(10)
-              .toList(),
-        );
+        setState(() => _results = results);
       }
     } catch (error) {
       if (mounted) setState(() => _message = '$error');
@@ -486,7 +501,8 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
             const Text(
               'Fino a 10 risultati. Il punteggio suggerisce una corrispondenza: scegli e salva manualmente dopo l’ascolto.',
             ),
-            if (defaultTargetPlatform == TargetPlatform.android)
+            if (widget.allowWatchTransfer &&
+                defaultTargetPlatform == TargetPlatform.android)
               const Text(
                 'Dopo il salvataggio puoi premere Invia all’orologio. '
                 'Il download da solo non avvia l’invio.',
@@ -538,7 +554,8 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
                     icon: const Icon(Icons.folder_open),
                     label: const Text('Apri cartella'),
                   ),
-                  if (defaultTargetPlatform == TargetPlatform.android)
+                  if (widget.allowWatchTransfer &&
+                      defaultTargetPlatform == TargetPlatform.android)
                     TextButton.icon(
                       onPressed: _operation != null ? null : _retryWatchSend,
                       icon: Icon(_transferFailed ? Icons.refresh : Icons.watch),
@@ -553,8 +570,10 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
                 child: const Text('Salva associazione Spotify → YouTube'),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Salva l’associazione e conferma i permessi per abilitare Scarica MP3. Destinazione: Download/SyncBeat.',
+              Text(
+                widget.playlistSuggestions == null
+                    ? 'Salva l’associazione e conferma i permessi per abilitare Scarica MP3. Destinazione: Download/SyncBeat.'
+                    : 'Conferma i permessi e salva l’associazione per includere questo brano nel download della playlist.',
               ),
               const Text(
                 'Download autorizzato: la presenza su YouTube o una licenza dichiarata non verificano da sole il permesso della piattaforma.',
@@ -607,7 +626,7 @@ class _YoutubeMatchDialogState extends State<YoutubeMatchDialog> {
           icon: const Icon(Icons.system_update_alt),
           label: const Text('Aggiorna motore YouTube'),
         ),
-      if (_selected != null)
+      if (_selected != null && widget.playlistSuggestions == null)
         FilledButton.icon(
           onPressed:
               _operation == null &&

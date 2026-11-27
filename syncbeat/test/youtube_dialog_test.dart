@@ -94,6 +94,33 @@ class _Download extends YoutubeDownloader {
 }
 
 void main() {
+  testWidgets('playlist review shows prepared results for a new track', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final video = fixtures.video('aaaaaaaaaaa');
+    final download = _Download();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: YoutubeMatchDialog(
+            track: fixtures.track,
+            playlistSuggestions: [RankedYoutubeVideo(video, 95)],
+            downloader: download,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final result = find.textContaining(video.title);
+    await tester.ensureVisible(result);
+    await tester.tap(result);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Video scelto:'), findsOneWidget);
+    expect(find.text('Scarica MP3'), findsNothing);
+    expect(download.calls, 0);
+  });
+
   testWidgets(
     'download footer is visible and requires saved choice plus both permissions; authorised click starts download',
     (tester) async {

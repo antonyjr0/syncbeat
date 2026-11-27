@@ -83,14 +83,18 @@ class PublicAudioStorage implements AudioStagingStorage {
     }
   }
 
-  Future<List<Map<String, dynamic>>> _records() async {
+  Future<List<Map<String, dynamic>>> _records({
+    bool Function(Map<String, dynamic>)? matches,
+  }) async {
     final records = <Map<String, dynamic>>[];
     if (_android) {
       final values = await channel.invokeListMethod<String>('records') ?? [];
       for (final value in values) {
         try {
           final data = jsonDecode(value) as Map<String, dynamic>;
-          if (await _valid(data)) records.add(data);
+          if ((matches == null || matches(data)) && await _valid(data)) {
+            records.add(data);
+          }
         } on FormatException {
           continue;
         } on TypeError {
@@ -107,7 +111,9 @@ class PublicAudioStorage implements AudioStagingStorage {
         if (data['path'] != entry.path.substring(0, entry.path.length - 5)) {
           continue;
         }
-        if (await _valid(data)) records.add(data);
+        if ((matches == null || matches(data)) && await _valid(data)) {
+          records.add(data);
+        }
       } on FormatException {
         continue;
       } on TypeError {
@@ -124,22 +130,47 @@ class PublicAudioStorage implements AudioStagingStorage {
       PublishedAudio(record['path'] as String, record['fileName'] as String),
   ];
 
+  Future<Map<String, PublishedAudio>> filesForSpotifyTracks(
+    Set<String> ids,
+  ) async {
+    final files = <String, PublishedAudio>{};
+    if (ids.isEmpty) return files;
+    final records = await _records(
+      matches: (record) {
+        final track = record['spotifyTrack'];
+        return track is Map && ids.contains(track['id']);
+      },
+    );
+    for (final record in records) {
+      final track = record['spotifyTrack'];
+      final id = track is Map ? track['id'] : null;
+      if (id is String && ids.contains(id)) {
+        files[id] = PublishedAudio(
+          record['path'] as String,
+          record['fileName'] as String,
+        );
+      }
+    }
+    return files;
+  }
+
   @override
   Future<StagedAudioFile?> findExistingCandidate(
     AudioCandidate candidate,
   ) async {
-    for (final data in await _records()) {
-      if (data['provider'] == candidate.providerId &&
-          data['providerItemId'] == candidate.id) {
-        return StagedAudioFile(
-          path: data['path'] as String,
-          fileName: data['fileName'] as String,
-          sizeBytes: data['sizeBytes'] as int,
-          sha256: data['sha256'] as String,
-          candidate: candidate,
-          stagedAt: DateTime.parse(data['stagedAt'] as String),
-        );
-      }
+    for (final data in await _records(
+      matches: (data) =>
+          data['provider'] == candidate.providerId &&
+          data['providerItemId'] == candidate.id,
+    )) {
+      return StagedAudioFile(
+        path: data['path'] as String,
+        fileName: data['fileName'] as String,
+        sizeBytes: data['sizeBytes'] as int,
+        sha256: data['sha256'] as String,
+        candidate: candidate,
+        stagedAt: DateTime.parse(data['stagedAt'] as String),
+      );
     }
     return null;
   }

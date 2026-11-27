@@ -5,6 +5,7 @@ import 'config/app_config.dart';
 import 'theme/syncbeat_theme.dart';
 import 'features/audio_sources/audio_match_dialog.dart';
 import 'features/audio_sources/local_audio_library.dart';
+import 'features/audio_sources/playlist_download_dialog.dart';
 import 'features/audio_sources/youtube_match_dialog.dart';
 import 'models/spotify_models.dart';
 import 'services/metadata_cache.dart';
@@ -188,6 +189,30 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
         _tracks = tracks;
         _importResults = [];
       });
+    } catch (error) {
+      _showError(error);
+    } finally {
+      if (mounted) setState(() => _busyAction = null);
+    }
+  }
+
+  Future<void> _downloadPlaylist() async {
+    final id = _selectedPlaylistId;
+    if (id == null || _busyAction != null) return;
+    final playlist = _playlists.firstWhere((item) => item.id == id);
+    setState(() {
+      _busyAction = 'tracks';
+      _errorMessage = null;
+    });
+    try {
+      final tracks = await _spotify.getPlaylistTracks(id);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) =>
+            PlaylistDownloadDialog(name: playlist.name, tracks: tracks),
+      );
     } catch (error) {
       _showError(error);
     } finally {
@@ -715,12 +740,25 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
               icon: Icon(Icons.download_for_offline_outlined, size: 18),
               label: Text('Carica brani'),
             );
+            final downloadButton = OutlinedButton.icon(
+              onPressed: _busyAction == null && _selectedPlaylistId != null
+                  ? _downloadPlaylist
+                  : null,
+              icon: const Icon(Icons.download_rounded, size: 18),
+              label: const Text('Scarica playlist'),
+            );
             if (constraints.maxWidth /
                     MediaQuery.textScalerOf(context).scale(1) <
                 560) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [dropdown, SizedBox(height: 10), loadButton],
+                children: [
+                  dropdown,
+                  const SizedBox(height: 10),
+                  loadButton,
+                  const SizedBox(height: 8),
+                  downloadButton,
+                ],
               );
             }
             return Row(
@@ -728,6 +766,8 @@ class _SyncBeatHomePageState extends State<SyncBeatHomePage> {
                 Expanded(child: dropdown),
                 SizedBox(width: 10),
                 loadButton,
+                const SizedBox(width: 10),
+                downloadButton,
               ],
             );
           },

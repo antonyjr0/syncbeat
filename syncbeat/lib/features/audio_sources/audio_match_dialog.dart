@@ -18,6 +18,7 @@ import 'public_audio_storage.dart';
 import 'staging_storage.dart';
 import 'track_matcher.dart';
 import 'youtube_match_dialog.dart';
+import 'youtube_matcher.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class AudioMatchDialog extends StatefulWidget {
@@ -28,6 +29,9 @@ class AudioMatchDialog extends StatefulWidget {
     this.downloadManager,
     this.matcher,
     this.watchTransfer,
+    this.allowWatchTransfer = true,
+    this.showJamendo = true,
+    this.playlistSuggestions,
     super.key,
   });
 
@@ -37,6 +41,9 @@ class AudioMatchDialog extends StatefulWidget {
   final AudioDownloadManager? downloadManager;
   final TrackMatcher? matcher;
   final ZeppDownloadTransfer? watchTransfer;
+  final bool allowWatchTransfer;
+  final bool showJamendo;
+  final List<RankedYoutubeVideo>? playlistSuggestions;
 
   @override
   State<AudioMatchDialog> createState() => _AudioMatchDialogState();
@@ -337,7 +344,8 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
               widget.track.artistLine,
               style: Theme.of(context).textTheme.bodyMedium,
             ),
-            if (defaultTargetPlatform == TargetPlatform.android)
+            if (widget.allowWatchTransfer &&
+                defaultTargetPlatform == TargetPlatform.android)
               const Text(
                 'Dopo il salvataggio puoi premere Invia all’orologio. '
                 'Il download da solo non avvia l’invio.',
@@ -352,22 +360,28 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
                       ? null
                       : () => showDialog<void>(
                           context: context,
-                          builder: (_) =>
-                              YoutubeMatchDialog(track: widget.track),
+                          builder: (_) => YoutubeMatchDialog(
+                            track: widget.track,
+                            allowWatchTransfer: widget.allowWatchTransfer,
+                            playlistSuggestions: widget.playlistSuggestions,
+                          ),
                         ),
                   icon: Icon(Icons.video_library),
                   label: Text('YouTube · ricerca principale'),
                 ),
-                FilledButton.icon(
-                  onPressed: _searching || _downloading ? null : _searchJamendo,
-                  icon: _searching
-                      ? SizedBox.square(
-                          dimension: 17,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Icon(Icons.search_rounded, size: 18),
-                  label: Text('Cerca su Jamendo'),
-                ),
+                if (widget.showJamendo)
+                  FilledButton.icon(
+                    onPressed: _searching || _downloading
+                        ? null
+                        : _searchJamendo,
+                    icon: _searching
+                        ? SizedBox.square(
+                            dimension: 17,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(Icons.search_rounded, size: 18),
+                    label: Text('Cerca su Jamendo'),
+                  ),
                 OutlinedButton.icon(
                   onPressed: _searching || _downloading ? null : _pickLocalMp3,
                   icon: Icon(Icons.folder_open_rounded, size: 18),
@@ -375,7 +389,7 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
                 ),
               ],
             ),
-            if (!_jamendo.isConfigured) ...[
+            if (widget.showJamendo && !_jamendo.isConfigured) ...[
               SizedBox(height: 10),
               Text(
                 'Jamendo richiede JAMENDO_CLIENT_ID configurato con --dart-define.',
@@ -441,13 +455,14 @@ class _AudioMatchDialogState extends State<AudioMatchDialog> {
             if (_stagedFile != null) ...[
               SizedBox(height: 12),
               Text(
-                'Salvato nello staging: ${_stagedFile!.fileName} · ${_formatBytes(_stagedFile!.sizeBytes)}',
+                'Salvato: ${_stagedFile!.fileName} · ${_formatBytes(_stagedFile!.sizeBytes)}',
                 style: TextStyle(
                   color: SyncBeatStatusColors.of(context).success,
                 ),
               ),
               if (_watchMessage != null) Text(_watchMessage!),
-              if (defaultTargetPlatform == TargetPlatform.android)
+              if (widget.allowWatchTransfer &&
+                  defaultTargetPlatform == TargetPlatform.android)
                 TextButton.icon(
                   onPressed: _downloading || _searching
                       ? null
